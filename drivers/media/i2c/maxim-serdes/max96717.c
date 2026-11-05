@@ -604,7 +604,7 @@ static int max96717_conf_pin_config_set_one(struct max96717_priv *priv,
 	case PIN_CONFIG_OUTPUT_ENABLE:
 	case PIN_CONFIG_INPUT_ENABLE:
 	case PIN_CONFIG_LEVEL:
-		val = field_prep(mask, arg ? en_val : ~en_val);
+		val = field_prep(mask, arg ? en_val : !en_val);
 
 		ret = regmap_update_bits(priv->regmap, reg, mask, val);
 		break;
