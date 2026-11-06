@@ -21,3 +21,10 @@ live under `.logs/`; the durable reference for the patch stack is
 - 2026-11-06 — scheduler decision: BORE is the tree's scheduler (`CONFIG_SCHED_BORE`
   in-tree, POC on). The EEVDF tuning pick was dropped by rebase and force-pushed;
   under BORE its block does not compile, so keeping it was dead code.
+- 2026-11-06 — AutoFDO + Rust build fix (`55ee2831893d`): Rust 1.100 stabilized
+  `-Zprofile-sample-use` as `-Cprofile-sample-use`, and LLVM 24 renamed
+  `-split-machine-functions` to `-function-splitting=all`; both spellings in
+  `scripts/Makefile.autofdo` were rejected, breaking `make prepare` at
+  `rust/core.o`. Version-gated the profile flag, probed the LLVM arg with
+  `rustc-option`; red/green verified against `make prepare` — see
+  `.logs/action-2026-11-06-autofdo-rust-flags.md`.
