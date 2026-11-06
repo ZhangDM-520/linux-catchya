@@ -4252,6 +4252,17 @@ should_compact_retry(gfp_t gfp_mask, struct alloc_context *ac, int order,
 	if (!ac->reclaim_compact_order)
 		return false;
 
+	/*
+	 * A promoted request exists only to make free blocks of the right
+	 * migratetype; escalating the compaction priority for it is exactly
+	 * the synchronous work the async policy avoids. Let it fall back and
+	 * leave the defragmentation to kcompactd, which the kswapd wakeup
+	 * from the same allocation already kicked.
+	 */
+	if (IS_ENABLED(CONFIG_THP_ASYNC_DEFRAG) &&
+	    order_defrag_promoted(order, ac))
+		return false;
+
 	if (fatal_signal_pending(current))
 		return false;
 

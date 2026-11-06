@@ -874,6 +874,27 @@ choice
 	  enabled at runtime via sysfs.
 endchoice
 
+config THP_ASYNC_DEFRAG
+	bool "Defer defragmentation to kcompactd by default"
+	depends on TRANSPARENT_HUGEPAGE
+	help
+	  Make "defer" the compiled-in default for
+	  /sys/kernel/mm/transparent_hugepage/defrag: a hugepage fault
+	  never enters direct reclaim or synchronous compaction. The
+	  allocation falls back to base pages immediately and
+	  defragmentation is delegated to kcompactd, which kswapd wakes
+	  on the same allocation.
+
+	  This trades a fraction of the hugepage hit rate for fault
+	  latency: direct compaction helps only when free pages of the
+	  right migratetype are already nearby, and otherwise stalls the
+	  faulting task while it scans. Applications that opt in with
+	  madvise(MADV_HUGEPAGE) are covered as well - the sysfs knob
+	  still offers "defer+madvise" for the old behaviour, and can be
+	  changed at runtime.
+
+	  Say N to keep the distro default ("defer+madvise").
+
 choice
 	prompt "Shmem hugepage allocation defaults"
 	default TRANSPARENT_HUGEPAGE_SHMEM_HUGE_NEVER
