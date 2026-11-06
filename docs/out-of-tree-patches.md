@@ -9,7 +9,7 @@ Companion book: `docs/cachyos-stack.md` covers the commits taken *from* CachyOS
 releases. This one covers everything else — including CachyOS **patch files**
 their own tree no longer ships, which is how BORE and POC ended up here.
 
-Last reviewed: 2026-11-07, against `master` = `bb5bec603ec4` (post `55ee2831`).
+Last reviewed: 2026-11-07, against `master` = `cc8482fde096`.
 
 ---
 
@@ -36,7 +36,8 @@ commit, and the CachyOS book's commit lists do not contain it, it belongs here.
 
 ## 2. Ledger
 
-Status values: **carried** (in `master`), **build-time** (applied by the
+Status values: **carried** (in `master`), **trialling** (a topic branch,
+built and booted, not yet on `master`), **build-time** (applied by the
 recipe), **retired** (removed, kept only as a note in section 8).
 
 | # | Patch | Status | Lives as | Upstream path | Conflict risk |
@@ -47,10 +48,17 @@ recipe), **retired** (removed, kept only as a note in section 8).
 | 4 | AutoFDO Rust flags | carried | `55ee2831893d` (1 file) | should go upstream | low |
 | 5 | `dkms-clang.patch` | build-time | recipe `dkms-clang.patch` | none (deliberate) | low |
 | 6 | NVIDIA open patches | build-time | `kernel-patches/<major>/misc/nvidia/*` | none | **high** — version-scoped |
+| 7 | THP async defrag | trialling | `90c8b34dd9df` (3 files) | none — a policy default, not submitted | low — `mm/huge_memory.c` defrag default, `should_compact_retry()` |
+| 8 | Idle pre-zeroing | trialling | `8b143fc6fce5` (7 files) | none | **medium** — `mm/page_alloc.c` alloc and free hot paths |
 
 Not a patch, kept for completeness: `8e1a563686be` `tools/exp/` (A/B and kexec
-campaign harness). It touches no kernel code, so it cannot conflict; it is the
-measurement gate every future import in section 5 must pass.
+campaign harness), extended by `61e1870a62df` with the fault-latency and QEMU
+correctness probes used by rows 7 and 8. It touches no kernel code, so it
+cannot conflict; it is the measurement gate every future import in section 5
+must pass.
+
+Also not a patch: the MGLRU half of the same import request. It resolved to
+"nothing to import" — see the candidate register in §5.4.
 
 ---
 
@@ -173,6 +181,77 @@ LLVM 24.0.0; see `.logs/action-2026-11-06-autofdo-rust-flags.md`.
 **Retire when** the equivalent lands in `scripts/Makefile.autofdo` upstream
 (mainline already fixed the linker half in `2b358510d5cc`).
 
+### 3.5 THP async defrag — `CONFIG_THP_ASYNC_DEFRAG`
+
+| Fact | Value |
+|---|---|
+| Our commit | `90c8b34dd9df`, branch `mm/thp-async-defrag`, 3 files, +35 −1 |
+| Provenance | written here (2026-11-07). No vendor patch to diff against: `defer` has been a runtime value of the defrag knob since it was added, and the promoted-order case in `should_compact_retry()` came in with `defrag_mode` |
+| Touch surface | `mm/huge_memory.c` (compiled default, 1 hunk), `mm/page_alloc.c` (`should_compact_retry()`, 1 hunk), `mm/Kconfig` |
+| Upstream status | none, and not submitted: this is a policy default, not a bug fix |
+| Measurement | booted (2026-11-07), plain and `DEBUG_VM` builds: the defrag attribute reads `always [defer] defer+madvise madvise never`. Not measured: the `thp_fault_fallback` rate and the fault P99 on bare metal — this laptop resolves ~5 % on timings, so the gate has to be a counter comparison |
+| Storage | commit on a topic branch; nothing to fetch at build time |
+| Retirement | the recipe stops selecting it, or a counter campaign shows the fallback cost is not worth the latency |
+
+Two deltas, both keyed off the Kconfig:
+
+| Delta | Site | Effect |
+|---|---|---|
+| Default becomes `defer`, not `defer+madvise` | `transparent_hugepage_flags`, `mm/huge_memory.c:61-77` | `vma_thp_gfp_mask()` returns `GFP_TRANSHUGE_LIGHT \| __GFP_KSWAPD_RECLAIM` for every VMA, `MADV_HUGEPAGE` included, so a fault never enters direct reclaim or synchronous compaction |
+| No priority escalation for promoted orders | `should_compact_retry()`, `mm/page_alloc.c` | the promoted `pageblock_order` request falls back to the `ALLOC_NOFRAGMENT` retry instead of retrying compaction at increasing priority |
+
+`THP_FAULT_FALLBACK` accounting is untouched, so a lost hugepage is always a
+visible counter rather than a silent policy change. `defrag` stays writable at
+runtime; the Kconfig only changes the compiled default.
+
+**Retire when** the `thp_fault_fallback` rate rises beyond noise on a quiet
+machine with no fault-latency win, or the recipe stops selecting the option.
+
+### 3.6 Idle pre-zeroing — `CONFIG_PREZERO_PAGES`
+
+| Fact | Value |
+|---|---|
+| Our commit | `8b143fc6fce5`, branch `mm/prezero-pages`, 7 files, +336 −20 |
+| Provenance | written here (2026-11-06/07). No mainline or vendor equivalent exists; `folio_zero_user()` is the closest prior art and encodes the opposite half of the idea (keep the faulting page hot) |
+| Touch surface | `mm/page_alloc.c` (`rmqueue_pcplist()`, `post_alloc_hook()`, `prep_new_page()`, `free_pcppages_bulk()`, `per_cpu_pages_init()`, `prezero_pcp()`, debugfs counters), `include/linux/mmzone.h` (`struct per_cpu_pages`), `include/linux/mm.h`, `mm/page_alloc.h`, `mm/compaction.c` (call sites), `kernel/sched/idle.c` (`do_idle()` hook), `mm/Kconfig` |
+| Upstream status | none; this is a new mechanism, not a backport |
+| Measurement | QEMU boot (2026-11-07): `filled` 326 → 430, `used` 318 → 407 over one probe run; zero invariant over 163840 pages; the same boot on a `DEBUG_VM` build is clean; `init_on_free=1` and `page_poison=1` both report `filled 0` and pass the invariant. Not measured: per-fault CPU cycles on bare metal |
+| Storage | commit on a topic branch |
+| Retirement | the per-fault cycle gate cannot beat the noise floor, or mainline grows an equivalent |
+
+**The invariant.** A page is zero if and only if it sits on a
+`pcp->zero_lists[mt]` entry. Nothing else may put a page there.
+`free_pcppages_bulk()` splices the zero lists back into the normal lists
+before draining, so CPU hotplug, zone drain and list overflow all degrade to
+stock behaviour. Runtime guards: `init_on_free` and `page_poisoning` both
+disable the feature (each deliberately leaves a free page in a state that is
+not zero); Kconfig refuses `DEBUG_PAGEALLOC` and `KMSAN`.
+
+**Designs refused** (recorded so they are not re-proposed): zeroing in
+`free_unref_page()` (charges the freeing task, often kswapd or an exiting
+process), zeroing inside the buddy allocator (holds `zone->lock`, and the page
+is re-verified after a merge anyway), and a per-page "zeroed" flag (no free
+`page` flag is safe to reuse in 7.4; list membership is free). Non-temporal
+stores are refused too: they bypass the cache, so the first user write to the
+page takes an extra DRAM fetch — the opposite of what `folio_zero_user()`
+achieves.
+
+**Retire when** the cycle gate on a quiet machine rejects it, or the allocator
+grows an equivalent mechanism.
+
+**Rebase surface.** Every symbol below changed shape during the 7.3→7.4 work,
+and two of them are silent corruption if resolved the obvious way:
+
+| Symbol in an older tree | In this tree | Rule at a bump |
+|---|---|---|
+| `kernel_init_free_pages(page, order)` | `clear_highpages_kasan_tagged()` in `mm/page_alloc.c` | use it — it resets KASAN tags and carries the s390 caveat |
+| `clear_page(addr)` | `clear_pages(addr, npages)` with ERMS alternatives in `arch/x86/include/asm/page_64.h` | keep the per-page call `clear_highpages_kasan_tagged(page, 1)` |
+| `prep_new_page(page, order, gfp, alloc_flags)` | same four arguments | gains `prezeroed`; all callers are inside `mm/`, so the compiler finds them |
+| `rmqueue_pcplist(zone, order, mt, alloc_flags)` | also takes `preferred_zone` | the zero-list lookup must stay inside the pcp trylock, before the normal list |
+| `struct per_cpu_pages` | `lists[NR_PCP_LISTS]`, `high_min`/`high_max`/`alloc_factor` | append fields, never reorder |
+| `free_pcppages_bulk()` | takes `pindex` and drains round-robin | the splice must target `pcp->lists[order_to_pindex(mt, 0)]`, **not** `pcp->lists[mt]`: the index is `mt * (PAGE_ALLOC_COSTLY_ORDER + 1) + order`, so `lists[mt]` is a different order's list for every `mt > 0` |
+| `do_idle()` | `kernel/sched/idle.c`, compiled into `build_policy.o` | hook before `local_irq_disable()`; the stub in `include/linux/mm.h` keeps `PREZERO_PAGES=n` builds identical |
+
 ---
 
 ## 4. Build-time patches (applied by the recipe)
@@ -286,7 +365,9 @@ Where an import waits before it earns a row in section 2. Status flow:
 
 | Candidate | Source | Status | Measurement | Notes |
 |---|---|---|---|---|
-| _none yet_ | | | | |
+| MGLRU aggressive tuning / backports | mainline `LRU_GEN*`, tuned by `CONFIG_CACHY` | **rejected — nothing to import** | in-tree and already on: `LRU_GEN=y`, `LRU_GEN_ENABLED=y`, caps `0x0007` (`CORE\|MM_WALK\|NONLEAF_YOUNG`), `swappiness` 100 | No MGLRU commit landed upstream after our base (`git log c463b80881fb..upstream/master --grep lru_gen` is empty), so there is no backport to take. The one real finding is a unit bug: `lru_gen_min_ttl` is 100 **jiffies**, so the protection window silently follows `_HZ_ticks` — 334 ms at the validation build's HZ=300, 166 ms for the HZ=600 package. It is a 2-line change (`HZ / 6`) *if* a measurement ever shows the HZ-scaled window is wrong; no measurement does, so no patch is carried |
+| THP async defrag | this tree | **trialling** | §3.5 | `CONFIG_THP_ASYNC_DEFRAG` |
+| Idle page pre-zeroing | this tree | **trialling** | §3.6 | `CONFIG_PREZERO_PAGES` |
 
 A candidate leaves `trialling` with exactly one of: a deterministic-counter win
 above noise, an upstream merge (then it is not an import at all), or a recorded

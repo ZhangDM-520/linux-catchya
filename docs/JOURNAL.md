@@ -35,3 +35,14 @@ live under `.logs/`; the durable reference for the patch stack is
   byte-identical 2038-line file and no patch source; NVIDIA patch list drifted
   (7.4 ships 0001/0002/0004/0005, recipe pins 0001-0003); intake protocol and
   retired-patch ledger added.
+- 2026-11-07 — mm out-of-tree import (`61e1870a62df`, `90c8b34dd9df`,
+  `8b143fc6fce5`; branches `mm/harness`, `mm/thp-async-defrag`,
+  `mm/prezero-pages`, integrated on `mm/outsource-imports`, nothing pushed).
+  Audit first: MGLRU is already in-tree and tuned (no backport exists), THP
+  async defrag is one policy default plus a retry suppression, idle
+  pre-zeroing is a new subsystem. Built with the recipe config and booted under
+  QEMU: `defrag` reads `[defer]`, the zero invariant holds over 163840 pages,
+  the debugfs counters show pages filled and consumed, and `init_on_free=1` /
+  `page_poison=1` both disable the feature — see
+  `.logs/action-2026-11-07-mm-imports.md` and `docs/out-of-tree-patches.md`
+  §3.5/§3.6.
