@@ -311,6 +311,14 @@ static void do_idle(void)
 #endif /* CONFIG_SCHED_POC_SELECTOR */
 
 	while (!need_resched()) {
+		/*
+		 * Nothing to run: put a few already-free pages of this CPU's
+		 * pcp list into the known-zero state, so the next allocation
+		 * here can skip clearing them. Interrupts are still enabled
+		 * at this point; the helper saves and restores them around
+		 * the short critical section.
+		 */
+		prezero_pcp();
 
 		/*
 		 * Interrupts shouldn't be re-enabled from that point on until

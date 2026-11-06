@@ -801,6 +801,9 @@ enum zone_watermarks {
 #endif
 #define NR_LOWORDER_PCP_LISTS (MIGRATE_PCPTYPES * (PAGE_ALLOC_COSTLY_ORDER + 1))
 #define NR_PCP_LISTS (NR_LOWORDER_PCP_LISTS + NR_PCP_THP)
+#ifdef CONFIG_PREZERO_PAGES
+#define NR_PCP_ZERO_LISTS MIGRATE_PCPTYPES
+#endif
 
 /*
  * Flags used in pcp->flags field.
@@ -833,6 +836,15 @@ struct per_cpu_pages {
 
 	/* Lists of pages, one per migrate type stored on the pcp-lists */
 	struct list_head lists[NR_PCP_LISTS];
+#ifdef CONFIG_PREZERO_PAGES
+	/*
+	 * Order-0 pages that are known to contain only zeroes. Membership of
+	 * these lists is the whole state: a page that is not on one of them
+	 * must be cleared before it is handed out.
+	 */
+	struct list_head zero_lists[NR_PCP_ZERO_LISTS];
+	int zero_count;		/* number of pages on zero_lists */
+#endif
 } ____cacheline_aligned_in_smp;
 
 struct per_cpu_zonestat {

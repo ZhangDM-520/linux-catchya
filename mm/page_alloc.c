@@ -35,6 +35,8 @@
 #include <linux/memory_hotplug.h>
 #include <linux/nodemask.h>
 #include <linux/vmstat.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
 #include <linux/fault-inject.h>
 #include <linux/compaction.h>
 #include <linux/crash_dump.h>
@@ -1470,6 +1472,24 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 	 */
 	count = min(pcp->count, count);
 
+#ifdef CONFIG_PREZERO_PAGES
+	{
+		int mt;
+
+		/*
+		 * The pages on the zero lists are ordinary free pages; they
+		 * only carry the "cleared" annotation. Dropping that
+		 * annotation here is what makes a drain (CPU hotplug, zone
+		 * drain, list overflow) safe: after this the pages are
+		 * cleared again on allocation, exactly as before.
+		 */
+		for (mt = 0; mt < NR_PCP_ZERO_LISTS; mt++)
+			list_splice_init(&pcp->zero_lists[mt],
+					 &pcp->lists[order_to_pindex(mt, 0)]);
+		pcp->zero_count = 0;
+	}
+#endif
+
 	/* Ensure requested pindex is drained first. */
 	pindex = pindex - 1;
 
@@ -1811,7 +1831,8 @@ static inline bool should_skip_init(gfp_t flags)
 }
 
 inline void post_alloc_hook(struct page *page, unsigned int order,
-				gfp_t gfp_flags, unsigned int alloc_flags)
+				gfp_t gfp_flags, unsigned int alloc_flags,
+				bool prezeroed)
 {
 	const bool zero_tags = gfp_flags & __GFP_ZEROTAGS;
 	bool init = !want_init_on_free() && want_init_on_alloc(gfp_flags) &&
@@ -1857,7 +1878,7 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 			page_kasan_tag_reset(page + i);
 	}
 	/* If memory is still not initialized, initialize it now. */
-	if (init)
+	if (init && !prezeroed)
 		clear_highpages_kasan_tagged(page, 1 << order);
 
 	set_page_owner(page, order, gfp_flags);
@@ -1866,9 +1887,10 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 }
 
 static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags,
-							unsigned int alloc_flags)
+							unsigned int alloc_flags,
+							bool prezeroed)
 {
-	post_alloc_hook(page, order, gfp_flags, alloc_flags);
+	post_alloc_hook(page, order, gfp_flags, alloc_flags, prezeroed);
 
 	if (order && (gfp_flags & __GFP_COMP))
 		prep_compound_page(page, order);
@@ -3322,20 +3344,43 @@ static int nr_pcp_alloc(struct per_cpu_pages *pcp, struct zone *zone, int order)
 	return batch;
 }
 
+#ifdef CONFIG_PREZERO_PAGES
+/*
+ * Counters for the measurement gate, and the only way to tell from user space
+ * that the idle loop is doing anything: pages moved into the known-zero state,
+ * allocations served from it (the post_alloc_hook() clear skipped), and idle
+ * entries that found nothing to do.
+ */
+static DEFINE_PER_CPU(long, prezero_filled);
+static DEFINE_PER_CPU(long, prezero_used);
+static DEFINE_PER_CPU(long, prezero_none);
+#endif
+
 /* Remove page from the per-cpu list, caller must protect the list */
 static inline
 struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 			int migratetype,
 			unsigned int alloc_flags,
 			struct per_cpu_pages *pcp,
-			struct list_head *list)
+			struct list_head *list,
+			bool refill)
 {
 	struct page *page;
 
 	do {
 		if (list_empty(list)) {
-			int batch = nr_pcp_alloc(pcp, zone, order);
+			int batch;
 			int alloced;
+
+			/*
+			 * A zero list is never refilled: the pages that
+			 * rmqueue_bulk() would put on it have not been
+			 * cleared, and membership means "known zero".
+			 */
+			if (!refill)
+				return NULL;
+
+			batch = nr_pcp_alloc(pcp, zone, order);
 
 			/*
 			 * Don't refill the list for a higher order atomic
@@ -3371,11 +3416,14 @@ struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 /* Lock and remove page from the per-cpu list */
 static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 			struct zone *zone, unsigned int order,
-			int migratetype, unsigned int alloc_flags)
+			int migratetype, unsigned int alloc_flags,
+			bool *prezeroed)
 {
 	struct per_cpu_pages *pcp;
 	struct list_head *list;
 	struct page *page;
+
+	*prezeroed = false;
 
 	/* spin_trylock may fail due to a parallel drain or IRQ reentrancy. */
 	pcp = pcp_spin_trylock(zone->per_cpu_pageset);
@@ -3388,8 +3436,31 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 	 * frees.
 	 */
 	pcp->free_count >>= 1;
+
 	list = &pcp->lists[order_to_pindex(migratetype, order)];
-	page = __rmqueue_pcplist(zone, order, migratetype, alloc_flags, pcp, list);
+	page = NULL;
+#ifdef CONFIG_PREZERO_PAGES
+	/*
+	 * Prefer a page in the prezeroed list: it saves the clear in
+	 * post_alloc_hook(). Only order-0 lists exist, and only for the
+	 * migrate types the pcp list itself tracks.
+	 */
+	if (!order && migratetype < MIGRATE_PCPTYPES &&
+	    !list_empty(&pcp->zero_lists[migratetype])) {
+		page = __rmqueue_pcplist(zone, order, migratetype, alloc_flags,
+					 pcp, &pcp->zero_lists[migratetype],
+					 false);
+		if (page) {
+			pcp->zero_count--;
+			this_cpu_inc(prezero_used);
+			*prezeroed = true;
+		}
+	}
+#endif
+	if (!page)
+		page = __rmqueue_pcplist(zone, order, migratetype, alloc_flags,
+					 pcp, list, true);
+
 	pcp_spin_unlock(pcp);
 	if (page) {
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1 << order);
@@ -3414,13 +3485,15 @@ static inline
 struct page *rmqueue(struct zone *preferred_zone,
 			struct zone *zone, unsigned int order,
 			gfp_t gfp_flags, unsigned int alloc_flags,
-			int migratetype)
+			int migratetype, bool *prezeroed)
 {
 	struct page *page;
 
+	*prezeroed = false;
+
 	if (likely(pcp_allowed_order(order))) {
 		page = rmqueue_pcplist(preferred_zone, zone, order,
-				       migratetype, alloc_flags);
+				       migratetype, alloc_flags, prezeroed);
 		if (likely(page))
 			goto out;
 	}
@@ -3439,6 +3512,175 @@ out:
 	VM_BUG_ON_PAGE(page && bad_range(zone, page), page);
 	return page;
 }
+
+#ifdef CONFIG_PREZERO_PAGES
+/*
+ * The zone to work on: the highest managed zone at or below ZONE_NORMAL,
+ * which is where order-0 user allocations land. ZONE_MOVABLE sits above it
+ * and must not be touched.
+ */
+static struct zone *prezero_zone(struct pglist_data *pgdat)
+{
+	int zid;
+
+	for (zid = ZONE_NORMAL; zid >= 0; zid--) {
+		if (managed_zone(&pgdat->node_zones[zid]))
+			return &pgdat->node_zones[zid];
+	}
+
+	return NULL;
+}
+
+/**
+ * prezero_pcp - zero a batch of pages already on the local pcp lists
+ *
+ * Called from the idle loop with interrupts enabled. Takes pages off the
+ * local per-CPU free lists, clears them, and puts them back on the per-CPU
+ * zero lists. Nothing is allocated or freed, so neither pcp->count nor the
+ * zone watermarks move; the only state that changes is which list a page
+ * sits on.
+ *
+ * The pages are then handed out by rmqueue_pcplist(), and post_alloc_hook()
+ * skips the clear for them. That is safe because a page on the zero list is
+ * never reachable by anything that could write to it: free_pcppages_bulk()
+ * folds the zero lists back into the normal lists before draining, the free
+ * path is skipped entirely when init_on_free is on, and poisoned pages are
+ * never put into a known state at all.
+ */
+void prezero_pcp(void)
+{
+	struct pglist_data *pgdat = NODE_DATA(numa_node_id());
+	struct per_cpu_pages *pcp;
+	struct page *pages[CONFIG_PREZERO_BATCH];
+	unsigned char mts[CONFIG_PREZERO_BATCH];
+	struct zone *zone;
+	unsigned long flags;
+	int want;
+	int nr = 0;
+	int i;
+	int mt;
+
+	/*
+	 * init_on_free clears the page again on release, so the annotation
+	 * would be stale by the time the page is allocated.
+	 */
+	if (want_init_on_free())
+		return;
+
+	/*
+	 * Free-page poisoning deliberately leaves the contents untouched, and
+	 * a poisoned page is checked for its pattern on allocation.
+	 */
+	if (page_poisoning_enabled_static())
+		return;
+
+	zone = prezero_zone(pgdat);
+	if (!zone)
+		return;
+
+	/* Never take pages from a zone that is already under pressure. */
+	if (!zone_watermark_ok(zone, 0, high_wmark_pages(zone),
+			       zone_idx(zone), 0))
+		return;
+
+	local_irq_save(flags);
+	pcp = pcp_spin_trylock(zone->per_cpu_pageset);
+	if (!pcp)
+		goto out_irq;
+
+	want = CONFIG_PREZERO_BATCH - pcp->zero_count;
+	while (nr < want) {
+		for (mt = 0; mt < MIGRATE_PCPTYPES; mt++) {
+			struct list_head *list =
+				&pcp->lists[order_to_pindex(mt, 0)];
+
+			if (list_empty(list))
+				continue;
+			pages[nr] = list_first_entry(list, struct page,
+						     pcp_list);
+			list_del(&pages[nr]->pcp_list);
+			VM_BUG_ON_PAGE(PageHWPoison(pages[nr]), pages[nr]);
+			mts[nr] = mt;
+			nr++;
+			break;
+		}
+		if (mt == MIGRATE_PCPTYPES)
+			break;
+	}
+
+	if (!nr) {
+		this_cpu_inc(prezero_none);
+		pcp_spin_unlock(pcp);
+		goto out_irq;
+	}
+
+	/*
+	 * The pages are off the lists from here on and pcp->count no longer
+	 * accounts for them, so a drain on another CPU either ignores them or
+	 * sees a consistent count.
+	 */
+	pcp->count -= nr;
+	/* Keep the task pinned: the pages must go back to this CPU's pcp. */
+	pcp_spin_unlock_nopin(pcp);
+
+	/*
+	 * Clear with interrupts enabled. The pcp lock is not held, and a batch
+	 * of page clears is long enough to matter for IRQ latency. Nothing
+	 * else can reach the pages while they are in flight.
+	 */
+	local_irq_enable();
+	for (i = 0; i < nr; i++)
+		clear_highpages_kasan_tagged(pages[i], 1);
+	local_irq_disable();
+
+	/*
+	 * Uncontended by construction: this is the pcp of the CPU we are
+	 * running on, with interrupts off, and the fast paths only trylock.
+	 */
+	pcp_spin_lock_nopin(pcp);
+	for (i = 0; i < nr; i++)
+		list_add(&pages[i]->pcp_list, &pcp->zero_lists[mts[i]]);
+	pcp->count += nr;
+	pcp->zero_count += nr;
+	pcp_spin_unlock_nopin(pcp);
+	this_cpu_add(prezero_filled, nr);
+
+	local_irq_restore(flags);
+	pcpu_task_unpin();
+	return;
+
+out_irq:
+	local_irq_restore(flags);
+}
+
+static int prezero_stats_show(struct seq_file *m, void *unused)
+{
+	long filled = 0;
+	long used = 0;
+	long none = 0;
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		filled += per_cpu(prezero_filled, cpu);
+		used += per_cpu(prezero_used, cpu);
+		none += per_cpu(prezero_none, cpu);
+	}
+
+	seq_printf(m, "filled %ld\n", filled);
+	seq_printf(m, "used %ld\n", used);
+	seq_printf(m, "none %ld\n", none);
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(prezero_stats);
+
+static int __init prezero_stats_init(void)
+{
+	debugfs_create_file("prezero_pages", 0444, NULL, NULL,
+			    &prezero_stats_fops);
+	return 0;
+}
+late_initcall(prezero_stats_init);
+#endif /* CONFIG_PREZERO_PAGES */
 
 /*
  * Reserve the pageblock(s) surrounding an allocation request for
@@ -3808,6 +4050,7 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	bool no_fallback;
 	bool skip_kswapd_nodes = nr_online_nodes > 1;
 	bool skipped_kswapd_nodes = false;
+	bool prezeroed;
 
 retry:
 	/*
@@ -3939,9 +4182,10 @@ check_alloc_wmark:
 
 try_this_zone:
 		page = rmqueue(zonelist_zone(ac->preferred_zoneref), zone, order,
-				gfp_mask, alloc_flags, ac->migratetype);
+				gfp_mask, alloc_flags, ac->migratetype, &prezeroed);
 		if (page) {
-			prep_new_page(page, order, gfp_mask, alloc_flags);
+			prep_new_page(page, order, gfp_mask, alloc_flags,
+				      prezeroed);
 
 			return page;
 		} else {
@@ -4210,7 +4454,7 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 
 	/* Prep a captured page if available */
 	if (page)
-		prep_new_page(page, order, gfp_mask, alloc_flags);
+		prep_new_page(page, order, gfp_mask, alloc_flags, false);
 
 	/* Try get a page from the freelist if available */
 	if (!page)
@@ -5297,7 +5541,7 @@ retry_this_zone:
 		}
 
 		page = __rmqueue_pcplist(zone, 0, ac.migratetype, alloc_flags,
-								pcp, pcp_list);
+								pcp, pcp_list, true);
 		if (unlikely(!page)) {
 			/* Try and allocate at least one page */
 			if (!nr_account) {
@@ -5308,7 +5552,7 @@ retry_this_zone:
 		}
 		nr_account++;
 
-		prep_new_page(page, 0, gfp, ALLOC_DEFAULT);
+		prep_new_page(page, 0, gfp, ALLOC_DEFAULT, false);
 		trace_mm_page_alloc(page, 0, gfp, ac.migratetype);
 		kmsan_alloc_page(page, 0, gfp & ~__GFP_RECLAIM);
 		set_page_refcounted(page);
@@ -6267,6 +6511,11 @@ static void per_cpu_pages_init(struct per_cpu_pages *pcp, struct per_cpu_zonesta
 	spin_lock_init(&pcp->lock);
 	for (pindex = 0; pindex < NR_PCP_LISTS; pindex++)
 		INIT_LIST_HEAD(&pcp->lists[pindex]);
+#ifdef CONFIG_PREZERO_PAGES
+	for (pindex = 0; pindex < NR_PCP_ZERO_LISTS; pindex++)
+		INIT_LIST_HEAD(&pcp->zero_lists[pindex]);
+	pcp->zero_count = 0;
+#endif
 
 	/*
 	 * Set batch and high values safe for a boot pageset. A true percpu
@@ -7217,7 +7466,8 @@ static void split_free_frozen_pages(struct list_head *list, gfp_t gfp_mask)
 		list_for_each_entry_safe(page, next, &list[order], lru) {
 			int i;
 
-			post_alloc_hook(page, order, gfp_mask, ALLOC_DEFAULT);
+			post_alloc_hook(page, order, gfp_mask, ALLOC_DEFAULT,
+					false);
 			if (!order)
 				continue;
 
@@ -7422,7 +7672,7 @@ int alloc_contig_frozen_range_noprof(unsigned long start, unsigned long end,
 		struct page *head = pfn_to_page(start);
 
 		check_new_pages(head, order);
-		prep_new_page(head, order, gfp_mask, ALLOC_DEFAULT);
+		prep_new_page(head, order, gfp_mask, ALLOC_DEFAULT, false);
 	} else {
 		ret = -EINVAL;
 		WARN(true, "PFN range: requested [%lu, %lu), allocated [%lu, %lu)\n",
