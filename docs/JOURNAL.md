@@ -28,3 +28,10 @@ live under `.logs/`; the durable reference for the patch stack is
   `rust/core.o`. Version-gated the profile flag, probed the LLVM arg with
   `rustc-option`; red/green verified against `make prepare` — see
   `.logs/action-2026-11-06-autofdo-rust-flags.md`.
+- 2026-11-07 — out-of-tree patch book (`86f41fcaf565`, `docs/out-of-tree-patches.md`):
+  every patch the tree carries that torvalds/linux does not have, with measured
+  provenance and rebase facts. BORE = published 7.4 patch + one conflict
+  resolution + the `!DEQUEUE_DELAYED` guard; POC = abandoned 7.3 commit with a
+  byte-identical 2038-line file and no patch source; NVIDIA patch list drifted
+  (7.4 ships 0001/0002/0004/0005, recipe pins 0001-0003); intake protocol and
+  retired-patch ledger added.
