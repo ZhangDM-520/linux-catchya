@@ -29,6 +29,16 @@ METRICS = {
     "req_p99":        (("schbench", "req_p99"), -1),
     "cyclictest_max": (("cyclictest", "max"), -1),
     "hackbench":      (("hackbench", "time"), -1),
+    # mm campaign: anonymous fault cost and hugepage fallback behaviour.
+    "fault4k_mean":   (("fault", "order0", "mean_ns"), -1),
+    "fault4k_p99":    (("fault", "order0", "p99_ns"), -1),
+    "faultthp_p99":   (("fault", "thp", "p99_ns"), -1),
+    # Exact /proc/vmstat deltas over the round: load-independent, and the
+    # only evidence the mm gates trust on a machine that is never quiet.
+    "thp_alloc":      (("vmstat", "thp_fault_alloc"), +1),
+    "thp_fallback":   (("vmstat", "thp_fault_fallback"), -1),
+    "compact_stall":  (("vmstat", "compact_stall"), -1),
+    "pgscan_direct":  (("vmstat", "pgscan_direct"), -1),
 }
 
 THRESH_PCT = {"throughput": 1.0, "latency": 2.0}
