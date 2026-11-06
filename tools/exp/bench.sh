@@ -14,7 +14,7 @@ set -uo pipefail
 
 EXP_DIR="${EXP_DIR:-$HOME/Projects/linux-catchya/.logs/exp}"
 BUILD_TREE="${BUILD_TREE:-$HOME/Workspace/exp/bt}"
-TAG=""; OUT=""; SECS=30; DO_BUILD=1; DO_PERF=0
+TAG=""; OUT=""; SECS=30; DO_BUILD=1; DO_PERF=0; DO_FAULT=0
 # Pinning the benchmark keeps desktop activity off the measured CPUs; without
 # it the wakeup-latency noise exceeds any plausible kernel effect.
 BENCH_CPUS="${BENCH_CPUS:-0-11}"
@@ -34,6 +34,7 @@ while [ $# -gt 0 ]; do
 		--secs)     SECS="$2"; shift 2 ;;
 		--no-build) DO_BUILD=0; shift ;;
 		--perf)     DO_PERF=1; shift ;;
+		--fault)    DO_FAULT=1; shift ;;
 		*) echo "unknown arg $1" >&2; exit 2 ;;
 	esac
 done
@@ -57,6 +58,14 @@ load_now() { cut -d' ' -f1 /proc/loadavg; }
 	echo "kernel=$(uname -r)"
 	echo "on_ac=$(cat /sys/class/power_supply/AC0/online 2>/dev/null)"
 } > "$TMP/env.txt"
+
+# ------------------------------------------------------------------- vmstat
+# Deltas of the exact counters are the primary evidence for the mm changes:
+# they do not move with machine load, unlike the timings below.
+vmstat_snapshot() {
+	awk 'NF == 2 {print $1, $2}' /proc/vmstat 2>/dev/null
+}
+vmstat_snapshot > "$TMP/vmstat-before.txt"
 
 # ------------------------------------------------------------------- schbench
 # -t = threads (one per CPU), -r = seconds. Both wakeup and request latencies
@@ -85,6 +94,24 @@ if [ "$DO_BUILD" = 1 ] && [ -d "$BUILD_TREE" ]; then
 	bt_end=$(date +%s.%N)
 	echo "wall=$(echo "$bt_end - $bt_start" | bc)" > "$TMP/build_time.txt"
 fi
+
+# -------------------------------------------------------------- fault latency
+# Anonymous fault cost, which is what idle pre-zeroing and the THP defrag
+# policy move. Pinned to the first benchmark CPU, and only ever one run at a
+# time: see ab.sh for why.
+if [ "$DO_FAULT" = 1 ]; then
+	FAULT_BIN="$EXP_DIR/bin/fault"
+	FAULT_CPU="${BENCH_CPUS%%,*}"
+	mkdir -p "$EXP_DIR/bin"
+	cc -O2 -o "$FAULT_BIN" \
+		"$HOME/Projects/linux-catchya/tools/exp/fault.c" || exit 1
+	taskset -c "$FAULT_CPU" "$FAULT_BIN" --size 32 --iters 20 --dontneed --json \
+		> "$TMP/fault-4k.json"
+	taskset -c "$FAULT_CPU" "$FAULT_BIN" --size 32 --iters 20 --dontneed \
+		--thp=madvise --json > "$TMP/fault-thp.json"
+fi
+
+vmstat_snapshot > "$TMP/vmstat-after.txt"
 
 # --------------------------------------------------------------- perf counters
 if [ "$DO_PERF" = 1 ]; then
@@ -148,6 +175,32 @@ for line in read("perf.csv").split("\n"):
         except ValueError:
             pass
 
+VMSTAT_KEYS = ("thp_fault_alloc", "thp_fault_fallback",
+               "thp_fault_fallback_charge", "compact_stall", "compact_success",
+               "compact_fail", "pgscan_kswapd", "pgscan_direct",
+               "pgsteal_kswapd", "pgsteal_direct", "workingset_refault_anon",
+               "workingset_refault_file", "pgalloc_dma32", "pgalloc_normal",
+               "pgalloc_movable")
+
+def vmstat(name):
+    vals = {}
+    try:
+        for line in open(os.path.join(tmp, name)):
+            key, val = line.split()
+            vals[key] = int(val)
+    except (OSError, ValueError):
+        return {}
+    return vals
+
+def jload(name):
+    try:
+        return json.loads(open(os.path.join(tmp, name)).read())
+    except (OSError, ValueError):
+        return None
+
+vb = vmstat("vmstat-before.txt")
+va = vmstat("vmstat-after.txt")
+
 out = {
     "tag": os.environ["TAG"],
     "ts": subprocess.check_output(["date", "-Is"]).decode().strip(),
@@ -157,6 +210,9 @@ out = {
     "hackbench": hb,
     "build": build,
     "perf": perf,
+    "fault": {"order0": jload("fault-4k.json"), "thp": jload("fault-thp.json")},
+    "vmstat": {k: va.get(k, 0) - vb.get(k, 0)
+               for k in VMSTAT_KEYS if k in va or k in vb},
 }
 path = os.environ["OUT"]
 os.makedirs(os.path.dirname(path), exist_ok=True)
