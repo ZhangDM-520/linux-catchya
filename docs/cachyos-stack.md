@@ -8,7 +8,7 @@ the original archaeology.
 Last reviewed: 2026-11-06, against `cachyos-7.4-rc1-1`. The 58 original commits
 were replayed onto the fork's synced master (torvalds master merged at
 `c463b80881fb`), and the eight commits recommended in section 6 were then
-cherry-picked on top — so the current stack is **66 CachyOS commits + 2 local**.
+cherry-picked on top — and the EEVDF tuning pick was then dropped, so the current stack is **65 CachyOS commits + 2 local**.
 
 ---
 
@@ -18,7 +18,7 @@ cherry-picked on top — so the current stack is **66 CachyOS commits + 2 local*
 master = torvalds master (merged into the fork at c463b80881fb, v7.4-rc2 era)
        + 58 CachyOS commits (cherry-pick -x, adapted where noted)
        + 2 local commits (max96717 fix, measurement harness)
-       + 8 CachyOS commits picked 2026-11-06 (section 3.9)
+       + 7 CachyOS commits picked 2026-11-06 (section 3.9)
 ```
 
 | Item | Value |
@@ -57,7 +57,8 @@ master = torvalds master (merged into the fork at c463b80881fb, v7.4-rc2 era)
 
 58 original: 5 `fixes` + 8 `vesa-dsc-bpp` + 2 `bbr3` + 23 `cachy` + 4
 `cachy`-adapted (POC, ADIOS, ACS, pipeliner) + 11 zram + 3 hdmi + 1 bore +
-1 iommu revert = 58. Plus the 8 picked on 2026-11-06 (section 3.9) = 66.
+1 iommu revert = 58. Plus 8 picked on 2026-11-06 (section 3.9) minus the EEVDF
+tuning commit dropped the same day = 65.
 
 ---
 
@@ -221,11 +222,11 @@ being committed.
 | `86704c28d36b` | CACHY: mm/vmscan: Increase vm_swappiness to 100 | `cachy` | SSD + zram; anon and file reclaim cost the same |
 | `8c72ecf33139` | mm: Increase VM_READAHEAD_PAGES to 256K | `cachy` | Not `CONFIG_CACHY`-gated; sequential read throughput |
 | `1de4ea4a1959` | rust: Allow BTF generation with Rust + LTO | `cachy` | Our LTO + BTF config silently dropped `CONFIG_RUST`; now selectable |
-| `80b6f557b5b7` | CACHY: sched/fair: Tweak EEVDF for interactivity | `cachy` | Base slice and migration cost to 400 us under `CONFIG_CACHY`; CachyOS's replacement for BORE |
 
-The EEVDF pick conflicted in `kernel/sched/fair.c` and was resolved as in
-section 6.1. The rebase onto the synced master replayed all eight without
-further conflicts.
+The EEVDF tuning pick (`17c3dd7d8067`, applied as `80b6f557b5b7`) was **dropped
+the same day**: this tree's scheduler is BORE, so the EEVDF block is compiled
+out and the pick was dead code. Its `SCHED_NR_MIGRATE_BREAK 8` hunk went with
+it. Seven picks remain.
 
 ---
 
@@ -260,10 +261,12 @@ Consequences for us:
 - Our POC is **on** by default. Two review-found bugs were fixed here
   (`rcu_dereference_all`, and skipping BORE's burst restart on
   `DEQUEUE_DELAYED`), but it is now a fork of an abandoned patch.
-- BORE is off by default, so it costs nothing at runtime; it exists as an A/B
-  option only.
-- Revisit at the next rebase: either adopt CachyOS's EEVDF tuning and drop
-  POC, or keep POC deliberately with our two fixes on top.
+- **Decision taken 2026-11-06:** BORE is this tree's scheduler, kept in-tree and
+  selected by config; POC stays on; CachyOS's EEVDF tuning is rejected. Under
+  `CONFIG_SCHED_BORE=y` the EEVDF base-slice block does not compile, so carrying
+  it would be dead code — the pick was dropped rather than kept for symmetry.
+- Consequence: we diverge from CachyOS's scheduler direction deliberately. Their
+  future scheduler work needs re-evaluating, not auto-picking.
 
 ### 5.2 Topics we carry that 7.4 no longer ships
 
@@ -307,9 +310,8 @@ resulting commits:
 | 3 | `c94b131ec0ac` CACHY: Disable watermark boosting by default | **clean** | `watermark_boost_factor = 0`; avoids the kswapd page-thrashing livelock described in the commit |
 | 4 | `6c797e2903fb` CACHY: Enable background reclaim of hugepages | **clean** | THP defrag default becomes `defer+madvise`, which is what an interactive desktop wants |
 | 5 | `a1a49cb638f4` CACHY: mm/vmscan: Increase vm_swappiness to 100 | **clean** | SSD + zram: file and anon reclaim cost the same, so 100 is defensible |
-| 6 | `17c3dd7d8067` CACHY: sched/fair: Tweak EEVDF for interactivity | **conflict** (resolved, 6.1) | base slice 400 us, migration cost 400 us — CachyOS's replacement for BORE |
-| 7 | `efac028fc910` mm: Increase VM_READAHEAD_PAGES to 256K | **clean** | Not `CONFIG_CACHY`-gated; doubles readahead for LPDDR5x sequential I/O |
-| 8 | `b632093480e9` rust: Allow BTF generation with Rust + LTO | **clean** | Only relevant if Rust drivers are wanted: our LTO + BTF config silently drops `CONFIG_RUST` today |
+| 6 | `efac028fc910` mm: Increase VM_READAHEAD_PAGES to 256K | **clean** | Not `CONFIG_CACHY`-gated; doubles readahead for LPDDR5x sequential I/O |
+| 7 | `b632093480e9` rust: Allow BTF generation with Rust + LTO | **clean** | Only relevant if Rust drivers are wanted: our LTO + BTF config silently drops `CONFIG_RUST` today |
 
 Rejected on evidence, not taste:
 
@@ -322,7 +324,7 @@ Rejected on evidence, not taste:
 - `de9ca7ed8e6a` intel-pstate, `9c5ac595d8a1` VHBA — no matching hardware.
 - `d2ae21da42b6` POC revert — a decision (section 5.1), not a pick.
 
-### 6.1 Resolution for pick 6 (the only conflict)
+### 6.1 Resolution used for the EEVDF pick before it was dropped
 
 CachyOS's `#ifdef CONFIG_CACHY` has to nest inside our
 `#else /* !CONFIG_SCHED_BORE */` branch:
@@ -419,6 +421,6 @@ missing (section 5.3).
    release, as was done for the eight picks in section 3.9.
 9. **The eight picks own defaults, not just code.** `vm.swappiness = 100`,
    `watermark_boost_factor = 0`, `compaction_proactiveness = 0`, THP
-   `defer+madvise`, 256 KiB readahead and 400 us base slice all change runtime
+   `defer+madvise` and 256 KiB readahead all change runtime
    behaviour under `CONFIG_CACHY=y`. Reverting a "bad kernel" report starts
    here, and each is still overridable at runtime through sysfs/sysctl.

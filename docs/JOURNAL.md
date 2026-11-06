@@ -17,4 +17,7 @@ live under `.logs/`; the durable reference for the patch stack is
 - 2026-11-06 — fork master synced to torvalds master (`c463b80881fb`); the eight
   commits identified in the gap analysis were cherry-picked and rebased on top
   (xHCI ownership, four mm defaults, 256 KiB readahead, Rust+BTF+LTO, EEVDF
-  interactivity tuning). Stack is now 66 CachyOS commits + 2 local.
+  interactivity tuning).
+- 2026-11-06 — scheduler decision: BORE is the tree's scheduler (`CONFIG_SCHED_BORE`
+  in-tree, POC on). The EEVDF tuning pick was dropped by rebase and force-pushed;
+  under BORE its block does not compile, so keeping it was dead code.
