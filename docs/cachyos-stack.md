@@ -5,6 +5,11 @@ the local deltas on top. It exists so that each commit can be explained,
 re-verified, and re-evaluated against a newer CachyOS release without repeating
 the original archaeology.
 
+Companion book: `docs/out-of-tree-patches.md` covers everything this tree
+carries that torvalds/linux does not have and this book does not own — BORE,
+the POC selector, our own fixes, and the patches the recipe applies at build
+time.
+
 Last reviewed: 2026-11-06, against `cachyos-7.4-rc1-1`. The 58 original commits
 were replayed onto the fork's synced master (torvalds master merged at
 `c463b80881fb`), and the eight commits recommended in section 6 were then
@@ -231,6 +236,9 @@ it. Seven picks remain.
 ---
 
 ## 4. Local deltas (2 commits, not CachyOS)
+
+Per-patch detail, including the version-tracking and retirement rules, lives in
+`docs/out-of-tree-patches.md` §3. Summary:
 
 | SHA | Subject | Why |
 |---|---|---|
