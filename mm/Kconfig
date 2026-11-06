@@ -895,6 +895,46 @@ config THP_ASYNC_DEFRAG
 
 	  Say N to keep the distro default ("defer+madvise").
 
+config PREZERO_PAGES
+	bool "Pre-zero free pages from the idle loop"
+	depends on !DEBUG_PAGEALLOC
+	depends on !KMSAN
+	help
+	  While a CPU is otherwise idle, zero a small batch of the order-0
+	  pages already sitting on its per-CPU free list, and remember them
+	  as zero. A later allocation that takes one of those pages can then
+	  skip the clear in post_alloc_hook().
+
+	  The cost is the same number of bytes written as the clear would
+	  have cost; what changes is that the write happens off the
+	  fault path, on a CPU that has nothing else to do. Nothing is
+	  allocated or freed, no watermark is crossed, and the pages stay in
+	  the same per-CPU page set, so the accounting does not move.
+
+	  This is only sound because a page on the zero list is never
+	  exposed to anything that could write to it: the only writers are
+	  the zeroing code itself, and every path that drains a per-CPU list
+	  (CPU hotplug, zone drain, list overflow) moves the pages back to
+	  the normal list, where they are cleared on allocation again.
+	  Pre-zeroing is also skipped at runtime when init_on_free or
+	  free-page poisoning is active, since both deliberately leave a
+	  free page in a state other than zero.
+
+	  Say N for the stock allocator behaviour.
+
+config PREZERO_BATCH
+	int "Pages to pre-zero per idle entry"
+	depends on PREZERO_PAGES
+	range 1 256
+	default 8
+	help
+	  How many pages one idle entry may zero. The pages are cleared with
+	  the per-CPU lock dropped and interrupts enabled, so this is not an
+	  interrupt latency bound; it bounds how long an idle entry stays in
+	  the idle loop before it is allowed to sleep. Eight pages is a few
+	  microseconds of work and is enough to keep the zero list stocked on
+	  an allocating CPU.
+
 choice
 	prompt "Shmem hugepage allocation defaults"
 	default TRANSPARENT_HUGEPAGE_SHMEM_HUGE_NEVER

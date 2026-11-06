@@ -5645,6 +5645,12 @@ static inline bool user_alloc_needs_zeroing(void)
 				   &init_on_alloc);
 }
 
+#ifdef CONFIG_PREZERO_PAGES
+void prezero_pcp(void);
+#else
+static inline void prezero_pcp(void) { }
+#endif
+
 int arch_get_shadow_stack_status(struct task_struct *t, unsigned long __user *status);
 int arch_set_shadow_stack_status(struct task_struct *t, unsigned long status);
 int arch_lock_shadow_stack_status(struct task_struct *t, unsigned long status);
