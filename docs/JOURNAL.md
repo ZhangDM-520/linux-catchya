@@ -46,3 +46,16 @@ live under `.logs/`; the durable reference for the patch stack is
   `page_poison=1` both disable the feature — see
   `.logs/action-2026-11-07-mm-imports.md` and `docs/out-of-tree-patches.md`
   §3.5/§3.6.
+- 2026-11-07 — AMD Strix Point intake (`1181bc1cefd2`, `91e3309dcd78`,
+  `50553fea7216`, `d3174f9cb969`; branches `amd/harness`, `amd/gfxoff-knob`,
+  `sched/futex-affine`, integrated on `amd/strix-point` over
+  `mm/outsource-imports`, nothing pushed).
+  Five requested items became one knob, one parked prototype, two "already
+  present" and one refusal: `ntsync` and the TTM UMA behaviour are in-tree
+  (config assertion and a QEMU ioctl probe added), GFXOFF entry delay is now
+  `amdgpu_gfx_off_delay_ms` (0-1000, default unchanged; built as =m and =y,
+  module loaded in QEMU, range enforced), the futex LLC hint moved 999/1000
+  wakeups into the waker's LLC in a 2-LLC QEMU boot (0/1000 without it) but
+  has no latency verdict without hardware, and DCN commit pruning is refused
+  with its reopen condition. See `.logs/action-2026-11-07-strix-point.md` and
+  `docs/out-of-tree-patches.md` §10.

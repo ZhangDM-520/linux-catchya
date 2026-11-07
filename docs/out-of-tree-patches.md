@@ -50,12 +50,15 @@ recipe), **retired** (removed, kept only as a note in section 8).
 | 6 | NVIDIA open patches | build-time | `kernel-patches/<major>/misc/nvidia/*` | none | **high** — version-scoped |
 | 7 | THP async defrag | trialling | `90c8b34dd9df` (3 files) | none — a policy default, not submitted | low — `mm/huge_memory.c` defrag default, `should_compact_retry()` |
 | 8 | Idle pre-zeroing | trialling | `8b143fc6fce5` (7 files) | none | **medium** — `mm/page_alloc.c` alloc and free hot paths |
+| 9 | GFXOFF entry delay knob | trialling | `ad910e9156c0` (1 file) | none — a tunable, not a fix | low — `amdgpu_gfx.c` only |
+| 10 | Cache-affine futex wake | trialling (parked) | `3b3d58b1ad9f` (6 files) | none — no reference patch exists | **medium** — `select_task_rq_fair()`, `wake_up_q()` |
 
 Not a patch, kept for completeness: `8e1a563686be` `tools/exp/` (A/B and kexec
 campaign harness), extended by `61e1870a62df` with the fault-latency and QEMU
-correctness probes used by rows 7 and 8. It touches no kernel code, so it
-cannot conflict; it is the measurement gate every future import in section 5
-must pass.
+correctness probes used by rows 7 and 8, and by `1181bc1cefd2`/`91e3309dcd78`
+with the module-packing boot harness and the futex placement probe used by
+rows 9 and 10. It touches no kernel code, so it cannot conflict; it is the
+measurement gate every future import in section 5 must pass.
 
 Also not a patch: the MGLRU half of the same import request. It resolved to
 "nothing to import" — see the candidate register in §5.4.
@@ -368,6 +371,11 @@ Where an import waits before it earns a row in section 2. Status flow:
 | MGLRU aggressive tuning / backports | mainline `LRU_GEN*`, tuned by `CONFIG_CACHY` | **rejected — nothing to import** | in-tree and already on: `LRU_GEN=y`, `LRU_GEN_ENABLED=y`, caps `0x0007` (`CORE\|MM_WALK\|NONLEAF_YOUNG`), `swappiness` 100 | No MGLRU commit landed upstream after our base (`git log c463b80881fb..upstream/master --grep lru_gen` is empty), so there is no backport to take. The one real finding is a unit bug: `lru_gen_min_ttl` is 100 **jiffies**, so the protection window silently follows `_HZ_ticks` — 334 ms at the validation build's HZ=300, 166 ms for the HZ=600 package. It is a 2-line change (`HZ / 6`) *if* a measurement ever shows the HZ-scaled window is wrong; no measurement does, so no patch is carried |
 | THP async defrag | this tree | **trialling** | §3.5 | `CONFIG_THP_ASYNC_DEFRAG` |
 | Idle page pre-zeroing | this tree | **trialling** | §3.6 | `CONFIG_PREZERO_PAGES` |
+| `ntsync` | mainline since 6.14 | **rejected — nothing to import** | §10.1 | only the config assertion and a QEMU ioctl probe were missing |
+| TTM UMA flattening / compaction bypass | mainline | **rejected — nothing to import** | §10.2 | `apu_prefer_gtt`, 2 MiB beneficial order and the no-reclaim path are all in-tree; no call site forces VRAM on such an APU |
+| GFXOFF hysteresis | this tree | **trialling** | §10.3 | `gfx_off_delay_ms` module parameter; FCLK floor refused (PMFW tables) |
+| Cache-affine futex wake | this tree | **trialling — parked** | §10.4 | `CONFIG_SCHED_FUTEX_AFFINE`; placement proven in QEMU, latency verdict needs hardware |
+| DCN 3.5 atomic-commit pruning | — | **rejected** | §10.5 | no reference patch, dead-display failure mode, benefit unmeasurable in QEMU |
 
 A candidate leaves `trialling` with exactly one of: a deterministic-counter win
 above noise, an upstream merge (then it is not an import at all), or a recorded
@@ -505,3 +513,106 @@ in-tree, delete the patch file **and** its `b2sums` entry in the same change.
   `sysctl_sched_base_slice = nsecs_per_tick` mean the base slice follows the
   recipe's `_HZ_ticks` (600 Hz here). A slice measurement taken on a 250 Hz
   kernel is not comparable.
+
+---
+
+## 10. AMD Strix Point (Zen 5 / RDNA 3.5) intake verdicts
+
+Requested as a five-item bundle: DCN 3.5 atomic-commit pruning, TTM UMA
+flattening, `ntsync`, cache-affine futex wake, GFXOFF hysteresis. The audit
+turned four of the five into something other than "import this patch":
+
+| Item | Verdict | Where |
+|---|---|---|
+| A — DCN 3.5 commit pruning | **refused** — no reference patch, failure mode is a dead display, benefit unmeasurable without the GPU | §10.5 |
+| B — TTM UMA flattening / compaction bypass | **already present** — automatic `apu_prefer_gtt`, 2 MiB beneficial order, no-reclaim path for non-beneficial orders | §10.2 |
+| C — `ntsync` | **already present** — in-tree module, config now asserted, QEMU ioctl probe passes | §10.1 |
+| D — cache-affine futex wake | **prototype, parked** — placement change proven in QEMU, latency verdict needs hardware | §10.4 |
+| E — GFXOFF hysteresis | **knob shipped** — module parameter, default unchanged | §10.3 |
+
+Ground rule for every row: QEMU has no RDNA 3.5, no SMU, no CCX topology, so
+nothing here claims a hardware-measured win. What was proven is compile,
+module load, ABI behaviour and "cannot corrupt state on a machine where the
+code is inactive".
+
+### 10.1 `ntsync` — present, no patch
+
+| Fact | Value |
+|---|---|
+| Where | `drivers/misc/ntsync.c`, `Documentation/userspace-api/ntsync.rst`, upstream since 6.14 |
+| Config | `CONFIG_NTSYNC=m` (`linux-recipe/config:2883`); no `depends on`, so nothing can gate it off silently |
+| What was added | the recipe now asserts `NTSYNC=m` in `_config_wants` (`linux-recipe/PKGBUILD`), so a config that loses it fails `verify-config.sh` instead of silently breaking Proton sync; red/green checked by mutating the config |
+| Probe | `tools/exp/ntsync_probe.c` loads `ntsync.ko` with `finit_module()` and exercises the ioctl ABI: create/read/release a semaphore, `WAIT_ANY`, mutex create/read/unlock, event set/read/reset |
+| Result | QEMU boot: `PASS module 01-ntsync.ko`, `PASS ntsync sem/wait/mutex/event` |
+| Not claimed | nothing about Proton's behaviour — only that the shipped ABI round-trips |
+
+The `module verification failed ... tainting kernel` line in that boot is
+expected: the initramfs modules are unsigned and the validation config does
+not enforce signatures.
+
+### 10.2 TTM UMA flattening — present, no patch
+
+Every mechanism the request describes is already in this tree:
+
+| Behaviour | Evidence |
+|---|---|
+| APUs prefer GTT automatically | `adev->apu_prefer_gtt = true` when `AMD_IS_APU && real_vram_size < gtt_size`, `drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c:2246-2248` |
+| The GPU pool is created with a 2 MiB beneficial order | `TTM_ALLOCATION_POOL_BENEFICIAL_ORDER(get_order(SZ_2M))` at `amdgpu_ttm.c:1953` and `:2149` |
+| Orders that are not beneficial skip reclaim | `ttm_pool_alloc_page()` drops `__GFP_RECLAIM` when `order != beneficial_order`, `drivers/gpu/drm/ttm/ttm_pool.c:179-184`; the beneficial order instead gets `__GFP_RETRY_MAYFAIL` (`:186-189`) |
+| No forced VRAM migration on an APU | `amdgpu_bo_placement_from_domain()` builds the placement list from the *requested* domain and marks GTT `TTM_PL_FLAG_FALLBACK` only when `!(adev->flags & AMD_IS_APU)`, `amdgpu_object.c` — so on an APU with `apu_prefer_gtt`, a VRAM\|GTT BO is not pushed into VRAM |
+| KFD is aware of the preference | `amdgpu_amdkfd_gpuvm.c:225,240,268,1690,1702,1760`; `kfd_svm.c:2834,3597` |
+
+Answer to the question the ladder asked: no call site *forces* `TTM_PL_VRAM`
+on such an APU beyond userspace explicitly asking for
+`AMDGPU_GEM_DOMAIN_VRAM`; the list is built from the requested domain. There
+is nothing to import, and the only unverifiable part is what the firmware and
+the memory controller do with the resulting placement — hardware, not QEMU.
+
+### 10.3 GFXOFF hysteresis — `amdgpu_gfx_off_delay_ms`
+
+| Fact | Value |
+|---|---|
+| Our commit | `ad910e9156c0` (topic branch `amd/gfxoff-knob`), 1 file, +27 −3 |
+| Provenance | written here (2026-11-07). It replaces one constant, `GFX_OFF_DELAY_ENABLE` = `msecs_to_jiffies(100)` (`amdgpu_gfx.c:42`), with a parameter of the same default |
+| Touch surface | `drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c` only — the parameter, and the delay read in `amdgpu_gfx_do_off_ctrl()` |
+| Upstream status | none, not submitted: it is a tunable, not a fix. FCLK/MCLK floors were refused — they live in PMFW tables (`smu14_driver_if_*.h`) and editing them is a firmware interface change |
+| Safety | the request still goes through `amdgpu_dpm_set_powergating_by_smu()` and its return value still gates `gfx_off_state`; `gfx_off_req_count` untouched; `0` is already reachable through the `no_delay` s2idle path; range enforced by `param_set_uint_minmax(0, 1000)` so an out-of-range write fails instead of being clamped |
+| Measurement | compile `DRM_AMDGPU=m` (module rebuilt, `modinfo -p` shows the parameter) and `=y` (all 316 objects in the directory built into `built-in.a`, no warnings); QEMU boot with the dependency chain packed: default 100, 0 and 1000 accepted, 1001/-1/"abc" rejected with the previous value intact; `checkpatch.pl --strict` clean apart from the file's pre-existing style |
+| Not measured | anything about GFXOFF itself: entry count, residency, power. Needs the hardware |
+| Retirement | the SMU path changes shape, or a hardware A/B shows the default is already right for every workload |
+
+### 10.4 Cache-affine futex wake — prototype, parked
+
+| Fact | Value |
+|---|---|
+| Our commit | `3b3d58b1ad9f` (topic branch `sched/futex-affine`), 6 files, +142 −4 |
+| Why it is not a backport | no upstream or vendor patch exists. `futex_wake()` batches with `wake_q_add()` and flushes with `wake_up_q()`, which passes no wake flags (`kernel/futex/waitwake.c:228,362`), so `select_task_rq_fair()` cannot know the wakee shares the futex word with the waker |
+| Mechanism | `WAKE_Q_FUTEX` (wake_q.h) → `wake_up_q_flags()` → `WF_FUTEX` (sched.h) → `futex_affine_cpu()` in `fair.c`: if the waker and the wakee's previous CPU are in different LLCs, look for an idle CPU in the waker's LLC with the existing `select_idle_cpu()`; otherwise return −1 and keep the normal placement. Behind `CONFIG_SCHED_FUTEX_AFFINE` (default n) and a static key, with `/proc/sys/kernel/sched_futex_affine` for A/B |
+| Guards | `cpumask_test_cpu(waker, p->cpus_ptr)` before any mask read; `select_idle_cpu()` itself returns −1 on an empty intersection (absence of `sd_llc` also returns −1); the hint can only move a wakee onto a CPU that was already idle |
+| QEMU placement evidence | 4 vCPUs in 2 sockets, waker on cpu0, wakee last on cpu3: hint off → `llc_hits=0/1000`; hint on → `llc_hits=999/1000` (`tools/exp/futex_ping.c` init mode, `affine_off`/`affine_on` lines) |
+| QEMU latency | p50 1433 ns off vs 1453 ns on — **no claim**: the exit is emulated and the workload is pinned to one pair |
+| Safety matrix run | `-smp 1`, `-smp 2`, `4,sockets=2,cores=2`, CPU 3 offlined/onlined around a run, static key toggled at runtime, wake path exercised in the 2-LLC boot: no WARN, BUG or panic; `DEBUG_VM`/`DEBUG_ATOMIC_SLEEP` and `SCHED_FUTEX_AFFINE=n` compiles clean |
+| Not run | `NUMA=n` build; `hackbench` stress (needs a user space); anything on silicon |
+| Merge condition | `bench.sh --futex` A/B on hardware that clears the ~5 % noise floor; until then it stays on the topic branch, default off |
+
+**Refused variants:** reusing `WF_SYNC` (it asserts that the waker is about to
+sleep, which is false when the waker wakes a third party), a "run the wakee on
+the waker's CPU" hint (it would serialise a ping-pong pair on one CPU), and a
+new placement policy of its own (priority/capacity/NUMA-aware search) instead
+of reusing `select_idle_cpu()`.
+
+### 10.5 DCN 3.5 atomic-commit pruning — refused
+
+The surfaces that would have to change are
+`amdgpu_dm_atomic_commit_tail()` (`amdgpu_dm.c:5145`), its
+`amdgpu_dm_commit_streams()` helper (`:4571`), and the implicit-sync/MST
+waits (`drm_dp_mst_atomic_wait_for_dependencies()`). There is no upstream,
+`amd-staging-drm-next`, or CachyOS patch to port: the commit tail in this tree
+is the stock shape, and there is no explicit-sync fast path to prune.
+
+Refusal reasons, in order: (1) a hand-written change in the commit tail fails
+as a dead or flickering display, which is not debuggable from QEMU; (2) every
+candidate is adjacent to firmware handshake state that QEMU does not model;
+(3) the benefit is a latency number on this laptop, unobtainable without the
+GPU. Recorded verdict: **reopen only with an upstream or `amd-staging` commit
+id and a hardware A/B**.
