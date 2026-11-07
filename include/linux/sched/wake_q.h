@@ -61,7 +61,20 @@ static inline bool wake_q_empty(struct wake_q_head *head)
 
 extern void wake_q_add(struct wake_q_head *head, struct task_struct *task);
 extern void wake_q_add_safe(struct wake_q_head *head, struct task_struct *task);
+
+/*
+ * Wake hints for wake_up_q_flags(). They are the interface between a caller
+ * that knows something about the waker/wakee relationship and the scheduler;
+ * kernel/sched/sched.h maps each onto its internal WF_* flag and core.c
+ * static_assert()s that the values still agree.
+ *
+ * WAKE_Q_FUTEX: the wakee is waiting on a futex the waker has just written, so
+ * the two share the futex word even when their CPUs do not share a cache.
+ */
+#define WAKE_Q_FUTEX	0x200
+
 extern void wake_up_q(struct wake_q_head *head);
+extern void wake_up_q_flags(struct wake_q_head *head, unsigned int wake_flags);
 
 /* Spin unlock helpers to unlock and call wake_up_q with preempt disabled */
 static inline

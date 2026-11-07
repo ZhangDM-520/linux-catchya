@@ -154,7 +154,36 @@ static unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
 static unsigned int sysctl_numa_balancing_promote_rate_limit = 65536;
 #endif
 
+#ifdef CONFIG_SCHED_FUTEX_AFFINE
+/*
+ * Compiling the option in is the opt-in; the sysctl only exists to turn the
+ * hint off again for an A/B run on the same kernel. A build without sysctls
+ * keeps the compiled decision.
+ */
+static DEFINE_STATIC_KEY_TRUE(sched_futex_affine);
+#endif
+
 #ifdef CONFIG_SYSCTL
+#ifdef CONFIG_SCHED_FUTEX_AFFINE
+static int sysctl_sched_futex_affine = 1;
+
+static int sched_futex_affine_handler(const struct ctl_table *table, int write,
+				      void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+
+	if (ret || !write)
+		return ret;
+
+	if (sysctl_sched_futex_affine)
+		static_branch_enable(&sched_futex_affine);
+	else
+		static_branch_disable(&sched_futex_affine);
+
+	return 0;
+}
+#endif /* CONFIG_SCHED_FUTEX_AFFINE */
+
 static const struct ctl_table sched_fair_sysctls[] = {
 #ifdef CONFIG_CFS_BANDWIDTH
 	{
@@ -176,6 +205,17 @@ static const struct ctl_table sched_fair_sysctls[] = {
 		.extra1		= SYSCTL_ZERO,
 	},
 #endif /* CONFIG_NUMA_BALANCING */
+#ifdef CONFIG_SCHED_FUTEX_AFFINE
+	{
+		.procname	= "sched_futex_affine",
+		.data		= &sysctl_sched_futex_affine,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= sched_futex_affine_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+#endif /* CONFIG_SCHED_FUTEX_AFFINE */
 };
 
 static int __init sched_fair_sysctl_init(void)
@@ -10130,6 +10170,46 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 	return target;
 }
 
+#ifdef CONFIG_SCHED_FUTEX_AFFINE
+/*
+ * The wakee of a futex shares the futex word with the waker, but it may have
+ * been running in a different LLC. Return an idle CPU in the waker's LLC when
+ * there is one, or -1 to keep the normal placement. The search is
+ * select_idle_cpu(), the same one select_idle_sibling() runs for a waker-CPU
+ * target, so this adds a preference and no placement policy of its own; a full
+ * LLC, an empty affinity mask or a missing LLC domain all fall back.
+ */
+static int futex_affine_cpu(struct task_struct *p, int waker_cpu, int prev_cpu)
+{
+	struct sched_domain *sd;
+	bool has_idle_core = false;
+	int cpu;
+
+	if (!static_branch_likely(&sched_futex_affine))
+		return -1;
+
+	if (!cpumask_test_cpu(waker_cpu, p->cpus_ptr))
+		return -1;
+
+	/* Same LLC: the regular affine path already covers this wake. */
+	if (cpus_share_cache(waker_cpu, prev_cpu))
+		return -1;
+
+	sd = rcu_dereference_all(per_cpu(sd_llc, waker_cpu));
+	if (!sd)
+		return -1;
+
+	if (sched_asym_cpucap_active())
+		sync_entity_load_avg(&p->se);
+
+	if (sched_smt_active())
+		has_idle_core = test_idle_cores(waker_cpu);
+
+	cpu = select_idle_cpu(p, sd, has_idle_core, waker_cpu);
+	return (unsigned int)cpu < nr_cpumask_bits ? cpu : -1;
+}
+#endif /* CONFIG_SCHED_FUTEX_AFFINE */
+
 /*
  * select_task_rq_fair: Select target runqueue for the waking task in domains
  * that have the relevant SD flag set. In practice, this is SD_BALANCE_WAKE,
@@ -10161,6 +10241,15 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 		if ((wake_flags & WF_CURRENT_CPU) &&
 		    cpumask_test_cpu(cpu, p->cpus_ptr))
 			return cpu;
+
+#ifdef CONFIG_SCHED_FUTEX_AFFINE
+		if (wake_flags & WF_FUTEX) {
+			int futex_cpu = futex_affine_cpu(p, cpu, prev_cpu);
+
+			if (futex_cpu >= 0)
+				return futex_cpu;
+		}
+#endif
 
 		if (!is_rd_overutilized(this_rq()->rd)) {
 			new_cpu = find_energy_efficient_cpu(p, prev_cpu);

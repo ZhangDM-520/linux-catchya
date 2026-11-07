@@ -1342,6 +1342,25 @@ config SCHED_POC_SELECTOR
 
 	  If unsure, say Y.
 
+config SCHED_FUTEX_AFFINE
+	bool "Prefer the waker's LLC when waking a futex waiter"
+	depends on SMP
+	default n
+	help
+	  A futex wake hands the wakee data the waker has just written, so the
+	  two share the futex word even when their CPUs do not share a cache.
+	  With this option the wake path prefers an idle CPU in the waker's LLC
+	  for that wake only; if nothing in that LLC is idle the wakee keeps its
+	  normal placement, so the hint can only move a wakee onto an idle CPU.
+
+	  The hint is a placement preference, not a policy: compiling the option
+	  in enables it, and /proc/sys/kernel/sched_futex_affine turns it off
+	  again for an A/B run on the same kernel. It is meant to be judged by
+	  measurement, since the win depends on the topology and on the
+	  workload's wake rate.
+
+	  If unsure, say N.
+
 config RELAY
 	bool "Kernel->user space relay support (formerly relayfs)"
 	select IRQ_WORK
