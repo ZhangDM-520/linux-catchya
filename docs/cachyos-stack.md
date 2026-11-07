@@ -20,7 +20,7 @@ cherry-picked on top — and the EEVDF tuning pick was then dropped, so the curr
 ## 1. What this tree is
 
 ```
-master = torvalds master (merged into the fork at c463b80881fb, v7.4-rc2 era)
+master = torvalds master (merged into the fork at d48723711bae, v7.4-rc2 era)
        + 58 CachyOS commits (cherry-pick -x, adapted where noted)
        + 2 local commits (max96717 fix, measurement harness)
        + 7 CachyOS commits picked 2026-11-06 (section 3.9)
@@ -28,7 +28,7 @@ master = torvalds master (merged into the fork at c463b80881fb, v7.4-rc2 era)
 
 | Item | Value |
 |---|---|
-| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master later merged upstream at c463b80881fb |
+| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master merged upstream at c463b80881fb, then again at d48723711bae (2026-11-07) |
 | Remotes | `origin` = ZhangDM-520/linux-catchya, `upstream` = torvalds/linux, `cachyos` = CachyOS/linux |
 | Source CachyOS release | `cachyos-7.4-rc1-1` (9b0672698044), itself 7.4-rc1 + 130 commits |
 | Merge base with upstream | `6628e7d4c6b2` (the v7.4-rc1 tag) |
@@ -431,10 +431,14 @@ missing (section 5.3).
 7. **AutoFDO + ThinLTO finds latent bugs.** It turned the max96717 bitfield
    overflow into a hard link error; expect more of these as profiles tighten.
 8. **Upstream moves.** The fork's master merged torvalds master at
-   `c463b80881fb` (v7.4-rc2 era); rebase onto it before comparing against a new
-   release, as was done for the eight picks in section 3.9.
+   `c463b80881fb` and again at `d48723711bae` (2026-11-07); rebase onto the
+   newest merge before comparing against a new release, as was done for the
+   eight picks in section 3.9.
 9. **The eight picks own defaults, not just code.** `vm.swappiness = 100`,
    `watermark_boost_factor = 0`, `compaction_proactiveness = 0`, THP
    `defer+madvise` and 256 KiB readahead all change runtime
-   behaviour under `CONFIG_CACHY=y`. Reverting a "bad kernel" report starts
-   here, and each is still overridable at runtime through sysfs/sysctl.
+   behaviour under `CONFIG_CACHY=y`. The recipe then turns
+   `CONFIG_THP_ASYNC_DEFRAG` on, which moves the THP default from
+   `defer+madvise` to plain `defer` — `always [defer] defer+madvise` is what a
+   booted package reads back. Reverting a "bad kernel" report starts here, and
+   each is still overridable at runtime through sysfs/sysctl.
