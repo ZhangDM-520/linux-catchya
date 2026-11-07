@@ -1,3 +1,153 @@
+catchya — a Linux kernel for a Zen 5 desktop laptop
+===================================================
+
+This is a working fork of the Linux kernel, not a distro patch dump. `master`
+tracks torvalds/linux and carries a curated optimisation stack on top of it:
+the CachyOS 7.4 desktop set, the BORE scheduler, and a small number of
+memory-management and scheduler changes that exist here because they were
+measured here.
+
+The goal is narrow and specific: make a 7.4 kernel that is faster in the two
+places a developer laptop actually feels the kernel (wakeup latency and fault
+latency), keeps idle power low on an AMD Strix Point SoC, and stays rebasable
+against upstream release cycles instead of drifting into a private tree.
+
+What this tree is
+-----------------
+
+    master = torvalds/linux (merged at c463b80881fb, 7.4-rc2 era)
+           + the CachyOS 7.4-rc1-1 desktop stack, cherry-pick -x
+           + local fixes and measurement tooling
+           + the catchya mm, scheduler and AMD changes
+
+    version 7.4.0-rc1      package linux-zeus 7.4.rc1-1
+    modules 7.4.0-rc1-1-zeus
+
+Every carried commit keeps its "(cherry picked from commit ...)" trailer, so
+`git log --grep "cherry picked from"` is the provenance index. Adaptations
+are squashed into the commit they belong to, never added as a follow-up fixup.
+
+What is optimised, and what each item buys
+------------------------------------------
+
+Scheduling — interactive responsiveness under load
+
+* BORE scheduler (`CONFIG_SCHED_BORE`). Burst-oriented burstable fair
+  scheduling: boosts the sleeper and the bursty task over the CPU hog, which
+  is what makes a desktop stay responsive while a build saturates the box.
+  CachyOS dropped BORE for 7.4; this tree keeps it, rebased, because the
+  alternative on 7.4 is stock EEVDF.
+* POC idle selector (`CONFIG_SCHED_POC_SELECTOR`). Cached-bitmap replacement
+  for the idle-CPU scan in `select_idle_sibling()`: same placement decision,
+  fewer cycles spent deciding, so a wakeup reaches a CPU sooner.
+* Cache-affine futex wake (`CONFIG_SCHED_FUTEX_AFFINE`). A futex wake is a
+  producer/consumer handoff, but the scheduler never saw that and could resume
+  the wakee in a different LLC from the waker. The hint prefers an idle CPU in
+  the waker's LLC and falls back when there is none, so it can only move a
+  wakee onto a CPU that was already idle. Kconfig default is off; the package
+  enables it. The placement change is proven, the latency win still needs
+  silicon, and `/proc/sys/kernel/sched_futex_affine` turns it off for an A/B.
+
+Memory — latency in the fault path
+
+* THP asynchronous defrag (`CONFIG_THP_ASYNC_DEFRAG`). The compiled default
+  for `transparent_hugepage/defrag` becomes `defer`: a 2 MiB fault that cannot
+  be served immediately falls back to base pages and hands defragmentation to
+  `kcompactd`, instead of stalling the faulting task in direct compaction.
+* Idle page pre-zeroing (`CONFIG_PREZERO_PAGES`). While a CPU is idle it zeroes
+  a small batch of its own per-CPU free pages, so an anonymous fault later
+  takes an already-zero page and skips the clear. Same bytes written, moved
+  off the fault path; the zero invariant is list membership, and every drain
+  path degrades to stock behaviour.
+* MGLRU stays on and tuned through `CONFIG_CACHY` (caps `0x0007`, swappiness
+  100, a 100-jiffy minimum TTL). Audited rather than patched: there is no
+  upstream MGLRU work to backport past this base.
+
+Graphics and SoC — Strix Point / RDNA 3.5
+
+* GFXOFF entry delay (`amdgpu.gfx_off_delay_ms`, 0-1000 ms, default 100). A
+  tunable, not a policy change: the request still goes through
+  `amdgpu_dpm_set_powergating_by_smu()` and its return value still gates
+  `gfx_off_state`. Lower it for a bursty workload, raise it for idle power.
+* DCN 3.5 and TTM UMA behaviour is verified stock: `apu_prefer_gtt`, the 2 MiB
+  beneficial allocation order and the no-reclaim path for other orders are
+  already upstream, so nothing was patched there. Commit-path pruning was
+  refused: no reference patch, and the failure mode is a dead display.
+
+Desktop and platform
+
+* BBR3 TCP congestion control (`CONFIG_TCP_CONG_BBR3`), zram with the zstd
+  backend, VESA DSC and passive VRR for the panel, AMD P-state in `guided`
+  mode by default, and the PCIe/USB/media fixes the CachyOS desktop set
+  carries for this class of machine.
+* One local correctness fix is carried because it is a build blocker, not a
+  performance change: `max96717` bitfield overflow in the pinconf setter,
+  which ThinLTO constant-folding turns into a link failure. Submitted
+  upstream separately.
+
+Build and package
+-----------------
+
+The kernel is built by the companion recipe (linux-cachyos-recipe), which
+consumes this repository as its source:
+
+    clang + ThinLTO          -march=native -mtune=native
+    AutoFDO                  -falign-functions=32 -falign-loops=32
+    Propeller                -ffp-contract=fast -funroll-loops
+                             -mprefer-vector-width=256
+
+    HZ=600                   PREEMPT_LAZY
+    CONFIG_CACHY=y           TRANSPARENT_HUGEPAGE=always
+    INIT_ON_ALLOC on         NTSYNC=m
+
+`pgo-in-one-go.sh` in the recipe runs the five-stage AutoFDO + Propeller
+pipeline (baseline build, guest profile under `perf kvm`, instrumented build,
+Propeller profiles, final `makepkg`). Out-of-tree kernel builds use `O=` as
+usual; see Documentation/kbuild/ for the build system itself.
+
+Measurement before claims
+-------------------------
+
+The rule that shapes this tree: a change earns a commit only if it moves
+something deterministic, otherwise it stays on a topic branch or is refused
+with the number that killed it. `tools/exp/` is the rig — a paired A/B
+runner, a recorded noise floor for this laptop, a fault-latency probe, a
+boot harness that runs a probe as PID 1 under QEMU, and probes for `ntsync`
+and the GFXOFF parameter. Where a claim needs hardware the tree does not have
+in a VM (GFXOFF residency, real CCX wake latency, DCN timings), the record
+says so instead of quoting a QEMU number.
+
+Ground rules
+------------
+
+* Nothing is pushed without the owner's say-so, and automation never adds a
+  `Signed-off-by`; only a human certifies the DCO.
+* One topic branch per change, each bisectable and buildable on its own;
+  `master` must build and boot before an experiment branch is cut.
+* AI-assisted contributions follow Documentation/process/coding-assistants.rst
+  and carry a `Co-authored-by` trailer, never a sign-off.
+
+Where the detail lives
+----------------------
+
+    docs/out-of-tree-patches.md   ledger of every patch this tree carries:
+                                  provenance, touch surface, measurement,
+                                  retirement condition, rebase rules
+    docs/cachyos-stack.md         the CachyOS stack, commit by commit, and how
+                                  this tree differs from the release
+    docs/JOURNAL.md               dated one-line pointers to action reports
+    .logs/action-*.md             per-task evidence: commands, results, what
+                                  could not be verified
+    tools/exp/                    measurement and boot-test harness
+
+If you are an AI coding assistant, those four are the contract: read the
+ledger before adding an optimisation, and record the measurement that
+justified it.
+
+---
+
+The upstream README follows unchanged.
+
 Linux kernel
 ============
 
