@@ -14,11 +14,20 @@
 #   EXTRA_CMDLINE="init_on_free=1" tools/exp/vmtest.sh
 #   BUILD=/path/to/build OUT=/tmp/vm tools/exp/vmtest.sh
 #
+#   # a different probe, with its module packed into the initramfs:
+#   INIT_SRC=tools/exp/ntsync_probe.c EXPECT="PASS ntsync" DONE="ntsync_probe: done" \
+#       WITH_MODULES=ntsync tools/exp/vmtest.sh
+#
 # Environment:
 #   SRC, BUILD, OUT   source tree, kernel build tree, output directory
 #   KERNEL            bzImage (default $BUILD/arch/x86/boot/bzImage)
 #   MEM, SMP, TMO     QEMU memory, vCPUs, wall-clock timeout
 #   EXTRA_CMDLINE     appended to the kernel command line
+#   INIT_SRC          probe source, compiled static and used as /init
+#   EXPECT, DONE      serial-log patterns that must appear
+#   WITH_MODULES      comma list of module names to pack and load
+#   STRIP_MODULES     strip debug info from the packed copies; the build tree
+#                     has CONFIG_DEBUG_INFO=y, so amdgpu.ko alone is 713 MiB
 set -uo pipefail
 
 SRC="${SRC:-$HOME/Projects/linux-catchya}"
@@ -29,6 +38,11 @@ MEM="${MEM:-2048}"
 SMP="${SMP:-2}"
 TMO="${TMO:-300}"
 EXTRA_CMDLINE="${EXTRA_CMDLINE:-}"
+INIT_SRC="${INIT_SRC:-$SRC/tools/exp/vmprobe.c}"
+EXPECT="${EXPECT:-PASS zero invariant}"
+DONE="${DONE:-vmprobe: done}"
+WITH_MODULES="${WITH_MODULES:-}"
+STRIP_MODULES="${STRIP_MODULES:-0}"
 CMDLINE="console=ttyS0,115200 rdinit=/init panic=1 oops=panic \
 loglevel=7 init_on_alloc=1 $EXTRA_CMDLINE"
 
@@ -38,10 +52,28 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 command -v qemu-system-x86_64 >/dev/null || fail "qemu-system-x86_64 not found"
 
 mkdir -p "$OUT/rootfs"
-rm -f "$OUT/rootfs/init" "$OUT/initramfs.cpio.gz" "$OUT/serial.log"
-cc -O2 -static -o "$OUT/rootfs/init" "$SRC/tools/exp/vmprobe.c" \
-	|| fail "cannot build the static probe"
+rm -rf "$OUT/rootfs/modules" "$OUT/rootfs/init" \
+	"$OUT/initramfs.cpio.gz" "$OUT/serial.log"
+cc -O2 -static -o "$OUT/rootfs/init" "$INIT_SRC" \
+	|| fail "cannot build the static probe from $INIT_SRC"
 install -m 0755 "$OUT/rootfs/init" "$OUT/init"
+
+if [ -n "$WITH_MODULES" ]; then
+	mkdir -p "$OUT/rootfs/modules"
+	i=0
+	for m in ${WITH_MODULES//,/ }; do
+		f=$(find "$BUILD" -name "$m.ko" -print -quit)
+		[ -n "$f" ] || fail "no $m.ko under $BUILD"
+		i=$((i + 1))
+		dst="$OUT/rootfs/modules/$(printf '%02d' "$i")-$m.ko"
+		cp "$f" "$dst"
+		if [ "$STRIP_MODULES" = 1 ]; then
+			objcopy --strip-debug "$dst" \
+				|| fail "cannot strip $(basename "$f")"
+		fi
+		echo "== packing $(basename "$f")"
+	done
+fi
 
 (
 	cd "$OUT/rootfs" || exit 1
@@ -62,15 +94,17 @@ rc=${PIPESTATUS[0]}
 
 echo "== checks"
 bad=0
-grep -q "PASS zero invariant" "$OUT/serial.log" \
-	|| { echo "FAIL: zero invariant did not report PASS"; bad=1; }
-grep -q "vmprobe: done" "$OUT/serial.log" \
-	|| { echo "FAIL: probe did not finish"; bad=1; }
+grep -q "$EXPECT" "$OUT/serial.log" \
+	|| { echo "FAIL: expected '$EXPECT' not in the log"; bad=1; }
+grep -q "$DONE" "$OUT/serial.log" \
+	|| { echo "FAIL: expected '$DONE' not in the log"; bad=1; }
+grep -qE "^FAIL " "$OUT/serial.log" \
+	&& { echo "FAIL: the probe reported a failure"; bad=1; }
 if grep -nE "cut here|Kernel panic|BUG: |Oops: |Call Trace:" \
 	"$OUT/serial.log"; then
 	echo "FAIL: kernel complained (see lines above)"
 	bad=1
 fi
-grep -E "^(PASS|FAIL) |^fault " "$OUT/serial.log"
+grep -E "^(PASS|FAIL|SKIP) |^fault |^module " "$OUT/serial.log"
 [ "$bad" = 0 ] && echo "== PASS" || echo "== FAIL"
 exit "$bad"
