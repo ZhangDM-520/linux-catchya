@@ -516,6 +516,13 @@ in-tree, delete the patch file **and** its `b2sums` entry in the same change.
   `SCHED_POC_SELECTOR` both default to `y` in `init/Kconfig`, so a tree that
   loses them builds happily with the stock scheduler. The recipe asserts both
   symbols in `init/Kconfig` before writing them — keep that assertion.
+- **BBR3 and BBR cannot both be built in.** `net/ipv4/tcp_bbr3.c` is a copy of
+  `tcp_bbr.c` and keeps its `BTF_ID_FLAGS(func, bbr_*)` list, so `TCP_CONG_BBR=y`
+  plus `TCP_CONG_BBR3=y` produces two of every `__BTF_ID__func__bbr_*` symbol in
+  `vmlinux.o` and `resolve_btfids` aborts with "Failed to generate BTF for
+  vmlinux" — a message that names neither BBR nor BTF ids. Verified 2026-11-07:
+  `nm vmlinux.o | grep -o "__BTF_ID__func__bbr_[a-z_]*"` shows `2` per name with
+  both built in, `1` with BBR3 as a module. Build BBR3 as `=m`.
 - **BORE defaults are per-HZ.** `nsecs_per_tick = 1000000000ULL / HZ` and
   `sysctl_sched_base_slice = nsecs_per_tick` mean the base slice follows the
   recipe's `_HZ_ticks` (600 Hz here). A slice measurement taken on a 250 Hz
