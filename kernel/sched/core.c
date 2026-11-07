@@ -1169,7 +1169,23 @@ void wake_q_add_safe(struct wake_q_head *head, struct task_struct *task)
 
 void wake_up_q(struct wake_q_head *head)
 {
+	wake_up_q_flags(head, 0);
+}
+
+/**
+ * wake_up_q_flags() - wake every task queued on @head with @wake_flags
+ * @head: the wake_q_head to drain
+ * @wake_flags: scheduler wake hints (WF_*), may be WAKE_Q_* from the caller
+ *
+ * Same contract as wake_up_q(); the flags reach try_to_wake_up() and from
+ * there select_task_rq(), so a caller can describe the waker/wakee
+ * relationship it knows about.
+ */
+void wake_up_q_flags(struct wake_q_head *head, unsigned int wake_flags)
+{
 	struct wake_q_node *node = head->first;
+
+	static_assert(WF_FUTEX == WAKE_Q_FUTEX);
 
 	while (node != WAKE_Q_TAIL) {
 		struct task_struct *task;
@@ -1181,10 +1197,10 @@ void wake_up_q(struct wake_q_head *head)
 		/* Task can safely be re-inserted now. */
 
 		/*
-		 * wake_up_process() executes a full barrier, which pairs with
+		 * try_to_wake_up() executes a full barrier, which pairs with
 		 * the queueing in wake_q_add() so as not to miss wakeups.
 		 */
-		wake_up_process(task);
+		try_to_wake_up(task, TASK_NORMAL, wake_flags);
 		put_task_struct(task);
 	}
 }

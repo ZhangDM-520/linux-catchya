@@ -225,7 +225,7 @@ int futex_wake(u32 __user *uaddr, unsigned int flags, void __user *pop, int nr_w
 	}
 
 	spin_unlock(&hb->lock);
-	wake_up_q(&wake_q);
+	wake_up_q_flags(&wake_q, WAKE_Q_FUTEX);
 	return ret;
 }
 
@@ -359,7 +359,7 @@ retry_private:
 out_unlock:
 		double_unlock_hb(hb1, hb2);
 	}
-	wake_up_q(&wake_q);
+	wake_up_q_flags(&wake_q, WAKE_Q_FUTEX);
 	return ret;
 }
 
