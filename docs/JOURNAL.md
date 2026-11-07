@@ -74,3 +74,11 @@ live under `.logs/`; the durable reference for the patch stack is
   (`21e93a8`) because upstream moved its context line; prepare re-run green
   with 113/113 expectations. Evidence:
   `.logs/action-2026-11-07-upstream-sync.md`.
+- 2026-11-07 — package rebuilt from the synced tree (`da3ff084cc1f` base,
+  recipe `6ec10d2`), and verified: full 1–5 run green with both profile stages
+  on the designed `~/.reserve/Kernel_PGO/` fallback (microVMs cannot capture
+  LBR), BBR3 found unbuilt and then found unbuildable as `=y` — its copied
+  `BTF_ID_FLAGS(func, bbr_*)` collide with BBR's and break `resolve_btfids` —
+  so it ships as `tcp_bbr3.ko`. Packaged vmlinuz boot-tested: zero invariant
+  PASS, futex placement 0/1000 → 999/1000. See
+  `.logs/action-2026-11-07-resync-package.md`.
