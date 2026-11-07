@@ -59,3 +59,7 @@ live under `.logs/`; the durable reference for the patch stack is
   has no latency verdict without hardware, and DCN commit pruning is refused
   with its reopen condition. See `.logs/action-2026-11-07-strix-point.md` and
   `docs/out-of-tree-patches.md` §10.
+- 2026-11-07 — README prepended with the project section (`89aa2a550f47`):
+  goal, the optimisation list with what each item buys, the two refusals, the
+  build recipe, and pointers to the ledger/stack book/journal/tools. Linus'
+  upstream text is preserved byte-for-byte below a separator.
