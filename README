@@ -76,10 +76,11 @@ Graphics and SoC — Strix Point / RDNA 3.5
 
 Desktop and platform
 
-* BBR3 TCP congestion control (`CONFIG_TCP_CONG_BBR3`), zram with the zstd
-  backend, VESA DSC and passive VRR for the panel, AMD P-state in `guided`
-  mode by default, and the PCIe/USB/media fixes the CachyOS desktop set
-  carries for this class of machine.
+* BBR3 TCP congestion control (`CONFIG_TCP_CONG_BBR3`, built in; BBR stays the
+  default, `sysctl -w net.ipv4.tcp_congestion_control=bbr3` selects it), zram
+  with the zstd backend, VESA DSC and passive VRR for the panel, AMD P-state
+  in `guided` mode by default, and the PCIe/USB/media fixes the CachyOS
+  desktop set carries for this class of machine.
 * One local correctness fix is carried because it is a build blocker, not a
   performance change: `max96717` bitfield overflow in the pinconf setter,
   which ThinLTO constant-folding turns into a link failure. Submitted
