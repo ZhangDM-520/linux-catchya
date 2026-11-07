@@ -70,4 +70,7 @@ live under `.logs/`; the durable reference for the patch stack is
   (`b32ecac779bb`, `2cf4be57b301`). Full recipe-config build clean (0 errors,
   0 warnings); QEMU boot passes the zero invariant and the 2-LLC futex
   placement check. Recorded in `docs/out-of-tree-patches.md` §8 and
-  `docs/cachyos-stack.md` §3.6.
+  `docs/cachyos-stack.md` §3.6. `dkms-clang.patch` regenerated in the recipe
+  (`21e93a8`) because upstream moved its context line; prepare re-run green
+  with 113/113 expectations. Evidence:
+  `.logs/action-2026-11-07-upstream-sync.md`.
