@@ -63,3 +63,11 @@ live under `.logs/`; the durable reference for the patch stack is
   goal, the optimisation list with what each item buys, the two refusals, the
   build recipe, and pointers to the ledger/stack book/journal/tools. Linus'
   upstream text is preserved byte-for-byte below a separator.
+- 2026-11-07 — sync with upstream `d48723711bae` (`da3ff084cc1f`, 327 commits
+  since `eedaa7d61f1e`). One conflict, `drivers/iommu/amd/iommu.c`: the 7.3
+  CachyOS revert of the GPU identity-mode quirk is retired — CachyOS never
+  carried it past 7.3 and upstream reworked the same code for PerfOpt
+  (`b32ecac779bb`, `2cf4be57b301`). Full recipe-config build clean (0 errors,
+  0 warnings); QEMU boot passes the zero invariant and the 2-LLC futex
+  placement check. Recorded in `docs/out-of-tree-patches.md` §8 and
+  `docs/cachyos-stack.md` §3.6.

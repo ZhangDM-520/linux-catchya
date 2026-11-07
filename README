@@ -15,7 +15,7 @@ against upstream release cycles instead of drifting into a private tree.
 What this tree is
 -----------------
 
-    master = torvalds/linux (merged at c463b80881fb, 7.4-rc2 era)
+    master = torvalds/linux (merged at d48723711bae, 7.4-rc2 era)
            + the CachyOS 7.4-rc1-1 desktop stack, cherry-pick -x
            + local fixes and measurement tooling
            + the catchya mm, scheduler and AMD changes

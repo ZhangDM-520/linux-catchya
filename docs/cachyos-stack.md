@@ -63,7 +63,8 @@ master = torvalds master (merged into the fork at c463b80881fb, v7.4-rc2 era)
 58 original: 5 `fixes` + 8 `vesa-dsc-bpp` + 2 `bbr3` + 23 `cachy` + 4
 `cachy`-adapted (POC, ADIOS, ACS, pipeliner) + 11 zram + 3 hdmi + 1 bore +
 1 iommu revert = 58. Plus 8 picked on 2026-11-06 (section 3.9) minus the EEVDF
-tuning commit dropped the same day = 65.
+tuning commit dropped the same day = 65. The iommu revert was retired at the
+2026-11-07 upstream merge, so the carried count is 64.
 
 ---
 
@@ -177,7 +178,7 @@ expect conflicts on every rebase.
 | SHA | Subject | Files | Source |
 |---|---|---:|---|
 | `0c8178231070` | ACPI: processor: Disable bus master check for AMD | 1 | `cachy` |
-| `43173c288242` | Revert "iommu/amd: Force identity mode for selected GPUs only" | 1 | **adapted** (`7.3/amd-iommu`) |
+| `43173c288242` | Revert "iommu/amd: Force identity mode for selected GPUs only" | 1 | **adapted** (`7.3/amd-iommu`) — **retired 2026-11-07** |
 | `d2d5365e8bcf` | drivers/pci: Add ACS override support | 3 | **adapted** (`cachy`) |
 | `94a22e28af31` | USB: core: sanitize string descriptors against C0 control characters | 1 | `fixes` |
 | `be05b8ffa389` | x86/cpu/amd: Don't clear RDSEED32 bit on znver5 | 1 | `fixes` |
@@ -191,6 +192,11 @@ this tree before the revert was picked.
 
 `ACS override` is gated behind `CONFIG_PCI_ACS_OVERRIDE`, which this tree does
 **not** enable; the patch is inert unless that symbol is turned on.
+
+The iommu revert is gone as of the 2026-11-07 upstream merge: CachyOS never
+carried it past 7.3 (`cf18d488df9d` is not an ancestor of `cachyos/7.4/cachy`),
+and upstream reworked the same code for PerfOpt while fixing the NULL bridge
+dereference the original commit introduced. See `out-of-tree-patches.md` §8.
 
 ### 3.7 Networking
 

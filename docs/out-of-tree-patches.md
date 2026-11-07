@@ -493,6 +493,7 @@ in-tree, delete the patch file **and** its `b2sums` entry in the same change.
 | `0001-autofdo-function-splitting-ld-option.patch` | 2026-11-05 (`7b252a4`) | Upstream `2b358510d5cc` landed the `ld-option` probe in-tree |
 | `0001-autofdo-rust-flags.patch` | 2026-11-06 | Superseded same day by in-tree `55ee2831893d`; the recipe patch would now fail as already-applied |
 | `0001-klflags-user-link-flags.patch` | 2026-11-02 (rewrite) | The `KLDFLAGS` channel existed only to forward `makepkg.conf` flags; the recipe now bakes `_kernel_cc_flags` and never lets makepkg flags reach kbuild. The file is still tracked in the recipe repo but wired out of `source[]` — safe to delete |
+| `43173c288242` Revert "iommu/amd: Force identity mode for selected GPUs only" | 2026-11-07 (upstream merge at `d48723711bae`) | CachyOS never carried it past 7.3: `cf18d488df9d` is not an ancestor of `cachyos/7.4/cachy`, so the tree was carrying a 7.3 workaround into 7.4. Upstream reworked the same code for PerfOpt (`b32ecac779bb`) and fixed the NULL upstream-bridge dereference that the original commit introduced (`2cf4be57b301`); keeping the revert would lose PerfOpt on this APU and conflict on every merge. Re-apply only for a machine with a discrete AMD GPU behind an ATI bridge (CachyOS issue #1095), where the runtime workaround is `iommu=pt` |
 
 ---
 
