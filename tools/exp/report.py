@@ -29,6 +29,9 @@ METRICS = {
     "req_p99":        (("schbench", "req_p99"), -1),
     "cyclictest_max": (("cyclictest", "max"), -1),
     "hackbench":      (("hackbench", "time"), -1),
+    # futex wake-to-run cost, for a cache-affine wake policy
+    "futex_p50":      (("futex", "p50_ns"), -1),
+    "futex_p99":      (("futex", "p99_ns"), -1),
 }
 
 THRESH_PCT = {"throughput": 1.0, "latency": 2.0}

@@ -14,7 +14,7 @@ set -uo pipefail
 
 EXP_DIR="${EXP_DIR:-$HOME/Projects/linux-catchya/.logs/exp}"
 BUILD_TREE="${BUILD_TREE:-$HOME/Workspace/exp/bt}"
-TAG=""; OUT=""; SECS=30; DO_BUILD=1; DO_PERF=0
+TAG=""; OUT=""; SECS=30; DO_BUILD=1; DO_PERF=0; DO_FUTEX=0
 # Pinning the benchmark keeps desktop activity off the measured CPUs; without
 # it the wakeup-latency noise exceeds any plausible kernel effect.
 BENCH_CPUS="${BENCH_CPUS:-0-11}"
@@ -34,6 +34,7 @@ while [ $# -gt 0 ]; do
 		--secs)     SECS="$2"; shift 2 ;;
 		--no-build) DO_BUILD=0; shift ;;
 		--perf)     DO_PERF=1; shift ;;
+		--futex)    DO_FUTEX=1; shift ;;
 		*) echo "unknown arg $1" >&2; exit 2 ;;
 	esac
 done
@@ -84,6 +85,21 @@ if [ "$DO_BUILD" = 1 ] && [ -d "$BUILD_TREE" ]; then
 		-j"$(nproc)" kernel/sched/ mm/ > "$TMP/build.txt" 2>&1
 	bt_end=$(date +%s.%N)
 	echo "wall=$(echo "$bt_end - $bt_start" | bc)" > "$TMP/build_time.txt"
+fi
+
+# ----------------------------------------------------------- futex wake cost
+# Wake-to-run latency of a futex pair. The waker and the waiter are pinned to
+# different CPUs on purpose: the number is the cross-CPU path, which is what a
+# cache-affine policy would change.
+if [ "$DO_FUTEX" = 1 ]; then
+	FUTEX_BIN="$EXP_DIR/bin/futex_ping"
+	mkdir -p "$EXP_DIR/bin"
+	cc -O2 -o "$FUTEX_BIN" \
+		"$HOME/Projects/linux-catchya/tools/exp/futex_ping.c" || exit 1
+	"$FUTEX_BIN" --iters 2000 \
+		--waker-cpu "${FUTEX_WAKER_CPU:-0}" \
+		--waiter-cpu "${FUTEX_WAITER_CPU:-1}" \
+		--json > "$TMP/futex.json"
 fi
 
 # --------------------------------------------------------------- perf counters
@@ -148,6 +164,12 @@ for line in read("perf.csv").split("\n"):
         except ValueError:
             pass
 
+def jload(name):
+    try:
+        return json.loads(read(name))
+    except (OSError, ValueError):
+        return {}
+
 out = {
     "tag": os.environ["TAG"],
     "ts": subprocess.check_output(["date", "-Is"]).decode().strip(),
@@ -157,6 +179,7 @@ out = {
     "hackbench": hb,
     "build": build,
     "perf": perf,
+    "futex": jload("futex.json"),
 }
 path = os.environ["OUT"]
 os.makedirs(os.path.dirname(path), exist_ok=True)
