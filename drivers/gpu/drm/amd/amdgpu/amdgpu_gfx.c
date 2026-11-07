@@ -38,8 +38,32 @@
 #include "mes_userqueue.h"
 #include "nvd.h"
 
-/* delay 0.1 second to enable gfx off feature */
-#define GFX_OFF_DELAY_ENABLE         msecs_to_jiffies(100)
+/*
+ * Driver-side hysteresis before the SMU is asked to enter GFXOFF. This is
+ * only the delay: the request still goes through
+ * amdgpu_dpm_set_powergating_by_smu() and its return value still gates
+ * gfx_off_state, so neither a very small nor a very large value can
+ * desynchronise the driver from the firmware. Too small wastes entry/exit
+ * round trips on a bursty workload; too large costs idle power.
+ */
+#define GFX_OFF_DELAY_MS_MAX	1000
+
+static int gfx_off_delay_ms_set(const char *val,
+				const struct kernel_param *kp)
+{
+	return param_set_uint_minmax(val, kp, 0, GFX_OFF_DELAY_MS_MAX);
+}
+
+static const struct kernel_param_ops gfx_off_delay_ms_ops = {
+	.set = gfx_off_delay_ms_set,
+	.get = param_get_uint,
+};
+
+static unsigned int gfx_off_delay_ms = 100;
+module_param_cb(gfx_off_delay_ms, &gfx_off_delay_ms_ops, &gfx_off_delay_ms,
+		0644);
+MODULE_PARM_DESC(gfx_off_delay_ms,
+		 "Delay before requesting GFXOFF, in ms (0-1000, default 100)");
 
 #define GFX_OFF_NO_DELAY 0
 
@@ -926,7 +950,7 @@ void amdgpu_gfx_handle_priv_fault(struct amdgpu_device *adev,
 static void amdgpu_gfx_do_off_ctrl(struct amdgpu_device *adev, bool enable,
 				   bool no_delay)
 {
-	unsigned long delay = GFX_OFF_DELAY_ENABLE;
+	unsigned long delay = msecs_to_jiffies(gfx_off_delay_ms);
 
 	if (!(adev->pm.pp_feature & PP_GFXOFF_MASK))
 		return;
