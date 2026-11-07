@@ -39,6 +39,9 @@ METRICS = {
     "thp_fallback":   (("vmstat", "thp_fault_fallback"), -1),
     "compact_stall":  (("vmstat", "compact_stall"), -1),
     "pgscan_direct":  (("vmstat", "pgscan_direct"), -1),
+    # futex wake-to-run cost, for a cache-affine wake policy
+    "futex_p50":      (("futex", "p50_ns"), -1),
+    "futex_p99":      (("futex", "p99_ns"), -1),
 }
 
 THRESH_PCT = {"throughput": 1.0, "latency": 2.0}

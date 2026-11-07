@@ -14,7 +14,7 @@ set -uo pipefail
 
 EXP_DIR="${EXP_DIR:-$HOME/Projects/linux-catchya/.logs/exp}"
 BUILD_TREE="${BUILD_TREE:-$HOME/Workspace/exp/bt}"
-TAG=""; OUT=""; SECS=30; DO_BUILD=1; DO_PERF=0; DO_FAULT=0
+TAG=""; OUT=""; SECS=30; DO_BUILD=1; DO_PERF=0; DO_FAULT=0; DO_FUTEX=0
 # Pinning the benchmark keeps desktop activity off the measured CPUs; without
 # it the wakeup-latency noise exceeds any plausible kernel effect.
 BENCH_CPUS="${BENCH_CPUS:-0-11}"
@@ -35,6 +35,7 @@ while [ $# -gt 0 ]; do
 		--no-build) DO_BUILD=0; shift ;;
 		--perf)     DO_PERF=1; shift ;;
 		--fault)    DO_FAULT=1; shift ;;
+		--futex)    DO_FUTEX=1; shift ;;
 		*) echo "unknown arg $1" >&2; exit 2 ;;
 	esac
 done
@@ -112,6 +113,21 @@ if [ "$DO_FAULT" = 1 ]; then
 fi
 
 vmstat_snapshot > "$TMP/vmstat-after.txt"
+
+# ----------------------------------------------------------- futex wake cost
+# Wake-to-run latency of a futex pair. The waker and the waiter are pinned to
+# different CPUs on purpose: the number is the cross-CPU path, which is what a
+# cache-affine policy would change.
+if [ "$DO_FUTEX" = 1 ]; then
+	FUTEX_BIN="$EXP_DIR/bin/futex_ping"
+	mkdir -p "$EXP_DIR/bin"
+	cc -O2 -o "$FUTEX_BIN" \
+		"$HOME/Projects/linux-catchya/tools/exp/futex_ping.c" || exit 1
+	"$FUTEX_BIN" --iters 2000 \
+		--waker-cpu "${FUTEX_WAKER_CPU:-0}" \
+		--waiter-cpu "${FUTEX_WAITER_CPU:-1}" \
+		--json > "$TMP/futex.json"
+fi
 
 # --------------------------------------------------------------- perf counters
 if [ "$DO_PERF" = 1 ]; then
@@ -213,6 +229,7 @@ out = {
     "fault": {"order0": jload("fault-4k.json"), "thp": jload("fault-thp.json")},
     "vmstat": {k: va.get(k, 0) - vb.get(k, 0)
                for k in VMSTAT_KEYS if k in va or k in vb},
+    "futex": jload("futex.json"),
 }
 path = os.environ["OUT"]
 os.makedirs(os.path.dirname(path), exist_ok=True)
