@@ -53,6 +53,12 @@ recipe), **retired** (removed, kept only as a note in section 8).
 | 9 | GFXOFF entry delay knob | trialling | `ad910e9156c0` (1 file) | none — a tunable, not a fix | low — `amdgpu_gfx.c` only |
 | 10 | Cache-affine futex wake | trialling (parked) | `3b3d58b1ad9f` (6 files) | none — no reference patch exists | **medium** — `select_task_rq_fair()`, `wake_up_q()` |
 
+Rows 7 and 8 cite the integration-chain commits. The standalone topic
+branches carry the same diffs rebased onto `master` - `mm/thp-async-defrag`
+(`dc45cc033153`) and `mm/prezero-pages` (`6cf964b4461d`) - so either SHA
+reproduces the change; the topic-branch SHAs differ only because they do not
+carry the harness commits that precede them on the integration chain.
+
 Not a patch, kept for completeness: `8e1a563686be` `tools/exp/` (A/B and kexec
 campaign harness), extended by `61e1870a62df` with the fault-latency and QEMU
 correctness probes used by rows 7 and 8, and by `1181bc1cefd2`/`91e3309dcd78`
