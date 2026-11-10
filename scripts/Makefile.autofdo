@@ -17,11 +17,16 @@ ifdef CLANG_AUTOFDO_PROFILE
   RUSTFLAGS_AUTOFDO_CLANG += $(call rustc-option,-Cllvm-args=-function-splitting=all,-Cllvm-args=-split-machine-functions)
 endif
 
-ifdef CONFIG_LTO_CLANG_THIN
+ifdef CONFIG_LTO_CLANG
   ifdef CLANG_AUTOFDO_PROFILE
     KBUILD_LDFLAGS += --lto-sample-profile=$(CLANG_AUTOFDO_PROFILE)
   endif
-  KBUILD_LDFLAGS += --mllvm=-enable-fs-discriminator=true --mllvm=-improved-fs-discriminator=true -plugin-opt=thinlto
+  KBUILD_LDFLAGS += --mllvm=-enable-fs-discriminator=true --mllvm=-improved-fs-discriminator=true
+  # -plugin-opt=thinlto selects the ThinLTO partitioner; it does not apply to
+  # Full LTO, where the profile flags above are equally needed.
+  ifdef CONFIG_LTO_CLANG_THIN
+    KBUILD_LDFLAGS += -plugin-opt=thinlto
+  endif
   KBUILD_LDFLAGS += $(call ld-option,-plugin-opt=-function-splitting=all,-plugin-opt=-split-machine-functions)
 endif
 
