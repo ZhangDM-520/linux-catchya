@@ -261,6 +261,34 @@ and two of them are silent corruption if resolved the obvious way:
 | `free_pcppages_bulk()` | takes `pindex` and drains round-robin | the splice must target `pcp->lists[order_to_pindex(mt, 0)]`, **not** `pcp->lists[mt]`: the index is `mt * (PAGE_ALLOC_COSTLY_ORDER + 1) + order`, so `lists[mt]` is a different order's list for every `mt > 0` |
 | `do_idle()` | `kernel/sched/idle.c`, compiled into `build_policy.o` | hook before `local_irq_disable()`; the stub in `include/linux/mm.h` keeps `PREZERO_PAGES=n` builds identical |
 
+### 3.7 AutoFDO/Propeller link-time profile flags — `scripts/Makefile.{autofdo,propeller}`
+
+| Fact | Value |
+|---|---|
+| Our change | `dbcb4111efa2`, 2 files, +8 −3; both fragments only, no compile flag changes |
+| Provenance | found from `.logs/autofdo-propeller-full-lto-bug-report.md` (2026-11-10). The guard comes from upstream `315ad8780a12` ("kbuild: Add AutoFDO support for Clang build", 2024-11-02), whose message never restricts AutoFDO to ThinLTO |
+| Touch surface | `scripts/Makefile.autofdo` (relax the outer guard to `CONFIG_LTO_CLANG`, keep `-plugin-opt=thinlto` behind `CONFIG_LTO_CLANG_THIN`), `scripts/Makefile.propeller` (same relaxation) |
+| Upstream status | unfixed in torvalds master at `b3dfbde62cf1` (post-7.4-rc2); not submitted |
+| Measurement | makefile-fragment harness (`CONFIG_LTO_CLANG_FULL=y` / `THIN=y` / no LTO): before, the Full arm produced **no** `KBUILD_LDFLAGS`; after, it emits `--lto-sample-profile`, both `--mllvm=-*-fs-discriminator` and `-plugin-opt=-split-machine-functions`, without `-plugin-opt=thinlto`; the Thin arm is byte-identical before and after, and the no-LTO arm stays empty. lld 24 accepts every emitted flag under `-flto=full`: `--lto-sample-profile` is parsed (a bogus file fails with "Unrecognized sample profile encoding format"), `--lto-basic-block-address-map` emits `.llvm_bb_addr_map`. Not measured: an end-to-end Full-LTO kernel build |
+| Storage | commit on master — the ThinLTO arm this package uses produces the identical linker command line, so the shipped build is unaffected |
+| Retirement | upstream applies the same relaxation |
+
+**The bug.** Under `CONFIG_LTO_CLANG_FULL=y`, both fragments gate all linker
+profile options on `CONFIG_LTO_CLANG_THIN`. The compile stage still passes
+`-fprofile-sample-use` and `-fbasic-block-address-map`, so the build looks
+profile-guided, but `ld.lld` gets no profile and does whole-program codegen
+blind. It fails silently: no warning, no build break.
+
+**Why `-plugin-opt=thinlto` stays behind the Thin guard.** lld accepts it under
+`-flto=full` without a diagnostic, and it names the ThinLTO partitioner, so
+passing it in a Full LTO link is at best meaningless and at worst switches the
+backend. The profile flags themselves are generic LTO codegen options.
+
+**Why this tree is unaffected in practice.** The package builds with
+`CONFIG_LTO_CLANG_THIN=y`; the harness shows the Thin arm's flag sequence is
+unchanged, so the binary is unchanged. The fix matters for anyone selecting
+Full LTO, and for the upstream tree.
+
 ---
 
 ## 4. Build-time patches (applied by the recipe)

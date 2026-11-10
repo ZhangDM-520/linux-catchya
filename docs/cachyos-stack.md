@@ -10,28 +10,33 @@ carries that torvalds/linux does not have and this book does not own — BORE,
 the POC selector, our own fixes, and the patches the recipe applies at build
 time.
 
-Last reviewed: 2026-11-06, against `cachyos-7.4-rc1-1`. The 58 original commits
-were replayed onto the fork's synced master (torvalds master merged at
-`c463b80881fb`), and the eight commits recommended in section 6 were then
-cherry-picked on top — and the EEVDF tuning pick was then dropped, so the current stack is **65 CachyOS commits + 2 local**.
+Last reviewed: 2026-11-10, against `cachyos-7.4-rc2-2` (`93b4b6f912da`). The
+58 original commits were replayed onto the fork's synced master (torvalds
+master merged at `c463b80881fb`, again at `d48723711bae` on 2026-11-07, and
+again at `6dd60528d55b` on 2026-11-10), and the commits recommended in section 6
+were cherry-picked on top. Current stack on `master`: **65 CachyOS commits +
+6 local kernel commits**, plus 4 `tools/` and 16 `docs/` commits. Two further
+CachyOS picks from `7.4-rc2-2` sit on the topic branch
+`sync/cachyos-7.4-rc2-2` awaiting a build and boot (section 3.10).
 
 ---
 
 ## 1. What this tree is
 
 ```
-master = torvalds master (merged into the fork at d48723711bae, v7.4-rc2 era)
+master = torvalds master (merged into the fork at 6dd60528d55b, post-7.4-rc2)
        + 58 CachyOS commits (cherry-pick -x, adapted where noted)
-       + 2 local commits (max96717 fix, measurement harness)
        + 7 CachyOS commits picked 2026-11-06 (section 3.9)
+       + 2 CachyOS commits picked 2026-11-10 (section 3.10)
+       + 6 local kernel commits, 4 tools/, 16 docs/
 ```
 
 | Item | Value |
 |---|---|
-| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master merged upstream at c463b80881fb, then again at d48723711bae (2026-11-07) |
+| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master merged upstream at c463b80881fb, at d48723711bae (2026-11-07), and at 6dd60528d55b (2026-11-10) |
 | Remotes | `origin` = ZhangDM-520/linux-catchya, `upstream` = torvalds/linux, `cachyos` = CachyOS/linux |
-| Source CachyOS release | `cachyos-7.4-rc1-1` (9b0672698044), itself 7.4-rc1 + 130 commits |
-| Merge base with upstream | `6628e7d4c6b2` (the v7.4-rc1 tag) |
+| Source CachyOS release | `cachyos-7.4-rc2-2` (93b4b6f912da, `7.4/base` tip), itself 7.4-rc2 + 135 non-merge commits |
+| Merge base with upstream | `7475ea8b5861` (the v7.4-rc2 tag) |
 | Rebase tooling | `tools/catchya-sync fetch` / `rebase` (rerere on, never pushes) |
 
 **Invariants**
@@ -65,6 +70,29 @@ master = torvalds master (merged into the fork at d48723711bae, v7.4-rc2 era)
 1 iommu revert = 58. Plus 8 picked on 2026-11-06 (section 3.9) minus the EEVDF
 tuning commit dropped the same day = 65. The iommu revert was retired at the
 2026-11-07 upstream merge, so the carried count is 64.
+
+### 2.1 Coverage after `cachyos-7.4-rc2-2` (2026-11-10)
+
+`cachyos-7.4-rc2-2` is 7.4-rc2 (`7475ea8b5861`) + 135 non-merge commits. Sorted
+by what we did with them:
+
+| Class | Count | Carried | Comment |
+|---|---:|---:|---|
+| Patch-identical to a commit we carry | 45 | 45 | `git patch-id --stable` equality |
+| Same subject, different patch-id | 4 | 4 | POC (`rcu_dereference_all` adaptation), ADIOS + its fixup (localversion hack, then removed), ACS (fixup already squashed), pipeliner (trimmed beside the GCC SMS commit) |
+| New CachyOS scheduler defaults | 2 | 0 (2 pending) | section 3.10 — on `sync/cachyos-7.4-rc2-2` until built and booted |
+| Apple T2 / macsmc + Apple-targeted fixes | 48 | 0 | wrong hardware; the largest single block in the release |
+| Samsung Galaxy Book audio + model fixups | 8 | 0 | wrong hardware |
+| Wrong vendor or board | 11 | 0 | i915 RC6 ×2, i915 fbdev, iwlwifi, btusb 13d3:3625, BT for PRIME B650M-A, Dell SOF quirk, Intel remapped NVMe, intel-pstate, VHBA, smu 5300 |
+| NAP cpuidle governor | 1 | 0 | refused, section 6.2 |
+| POC revert, EEVDF interactivity tweak | 2 | 0 | decisions, section 5.1 |
+| Compiler work not applicable | 2 | 0 | Zen4/x86-64 ISA (we pass `-march=native`), GCC SMS (we build clang) |
+| Repo/recipe tooling | 8 | 0 | tag-release scripts ×6, `resolve_btfids` PKGBUILD, one more |
+| `drm/gud` apply + revert pair | 2 | 0 | net zero |
+| Fixups already folded into our squashed commits | 2 | 2 | ACS, ADIOS |
+
+Total 135 = 45 + 4 + 86 new, and the 86 new = 2 taken + 84 refused with a
+reason. Nothing is pending classification.
 
 ---
 
@@ -239,9 +267,41 @@ the same day**: this tree's scheduler is BORE, so the EEVDF block is compiled
 out and the pick was dead code. Its `SCHED_NR_MIGRATE_BREAK 8` hunk went with
 it. Seven picks remain.
 
+### 3.10 Picked from `cachyos-7.4-rc2-2` on 2026-11-10 — topic branch, not yet on master
+
+Two commits, both `#ifdef CONFIG_CACHY` defaults, both cherry-picked with `-x`
+onto `sync/cachyos-7.4-rc2-2` off `2b8643e6b2a8`:
+
+| SHA (branch) | Subject | Source commit | Why |
+|---|---|---|---|
+| `1d9be3bb9dd1` | CACHY: Change default cgroup_mode to max | `ff4cf904d132` | `calc_group_shares` starts on `calc_max_shares` and `cgroup_mode = 3`; the same "cachymod defaults" class as swappiness 100, watermark boost off and split-lock mitigation off, which this tree already carries |
+| `b7c9c30ccebe` | CACHY: Disable DELAY_DEQUEUE | `d3dd3a45029f` | `DELAY_DEQUEUE` and `DELAY_ZERO` become false under `CONFIG_CACHY` |
+
+**Status: not on `master`.** The kernel build and the QEMU boot were deferred on
+2026-11-10, and invariant 4 above is that master only carries what has been
+built and booted. Promotion needs:
+
+1. `make O=<dir> LLVM=1` with the recipe config (`CONFIG_CACHY=y`) and clean
+   `kernel/sched/`;
+2. a QEMU boot that runs `tools/exp/sched_defaults_probe.c` — it checks
+   `/sys/kernel/debug/sched/cgroup_mode` is `max`, that `sched/features`
+   contains `NO_DELAY_DEQUEUE` and `NO_DELAY_ZERO`, and that BORE's
+   `base_slice_ns` node exists (the probe is the reason it was written);
+3. a dmesg check for sched warnings after boot.
+
+BORE interaction, checked at the source level: the only `DELAY_DEQUEUE` use is
+`__dequeue_task()` (`kernel/sched/fair.c:8484`), which BORE does not modify, so
+the two compose. The *pairing* is new — BORE was written with delayed dequeue
+on, and CachyOS wrote this default against a tree that has no BORE — so it is
+the first suspect if scheduler behaviour regresses after promotion.
+
+Not claimed: the interactivity improvement both commit messages describe. That
+is CachyOS/community evidence; this tree has no A/B for it and the QEMU guest
+cannot supply one.
+
 ---
 
-## 4. Local deltas (2 commits, not CachyOS)
+## 4. Local deltas (6 kernel commits + the measurement rig, not CachyOS)
 
 Per-patch detail, including the version-tracking and retirement rules, lives in
 `docs/out-of-tree-patches.md` §3. Summary:
@@ -249,7 +309,17 @@ Per-patch detail, including the version-tracking and retirement rules, lives in
 | SHA | Subject | Why |
 |---|---|---|
 | `299f0b100cd8` | media: i2c: max96717: fix bitfield overflow in pinconf setter | `~en_val` does not fit a 1-bit `field_prep()` mask; AutoFDO + ThinLTO constant-folds the helper and the build fails in `ld.lld`. Reproduced with the recipe's own `afdo.prof`. Submitted upstream separately. |
+| `55ee2831893d` | kbuild: AutoFDO: update Rust flags for rustc 1.100 and LLVM 24 | The in-tree `scripts/Makefile.autofdo` used flags rustc 1.100 rejects; the recipe patch was retired in favour of this commit (ledger §8). |
+| `90c8b34dd9df` | mm: defer hugepage defrag to kcompactd by default | `CONFIG_THP_ASYNC_DEFRAG`: `transparent_hugepage/defrag=defer` becomes the compiled default. Ledger §3.5. |
+| `8b143fc6fce5` | mm: pre-zero free pages from the idle loop | `CONFIG_PREZERO_PAGES`: idle CPUs zero their own free pages so a later anon fault skips the clear. Ledger §3.6. |
+| `d3174f9cb969` | sched/futex: prefer the waker's LLC when waking a futex waiter | `CONFIG_SCHED_FUTEX_AFFINE`, default off; placement proven in QEMU, latency verdict parked. Ledger §10.4. |
+| `50553fea7216` | drm/amdgpu: make the GFXOFF entry delay a module parameter | `amdgpu.gfx_off_delay_ms`, default unchanged. Ledger §10.3. |
 | `8e1a563686be` | tools: add local A/B measurement and kexec campaign harness | `tools/exp/` — the measurement rig and its recorded noise floor. |
+| `dbcb4111efa2` | kbuild: AutoFDO/Propeller: wire link-time profile flags for Full LTO | `scripts/Makefile.autofdo` and `scripts/Makefile.propeller` gated every link-time profile option on `CONFIG_LTO_CLANG_THIN`, so a `CONFIG_LTO_CLANG_FULL` build compiled with profile flags and linked blind. Ledger §3.7; ThinLTO output is unchanged by the fix. |
+
+The last four rows arrived after this book's 2026-11-06 revision; the list is
+now the complete local set (`git log --oneline master --not <torvalds-parent>`
+minus the CachyOS imports).
 
 ---
 
@@ -363,6 +433,68 @@ __read_mostly unsigned int sysctl_sched_migration_cost	= 500000UL;
 
 Verified: `kernel/sched/` compiles clean with `CONFIG_CACHY=y`, BORE off and
 BORE on.
+
+### 6.2 Gap analysis vs `cachyos-7.4-rc2-2` (2026-11-10)
+
+Method: subject match against the 91 commits we carry outside torvalds, then
+`git patch-id --stable` on every match; the 86 that do not match are classified
+by hardware and mechanism. Counts are in section 2.1, refusals in one line each
+below.
+
+Picked (section 3.10, on `sync/cachyos-7.4-rc2-2` pending build and boot):
+`ff4cf904d132` cgroup_mode=max, `d3dd3a45029f` DELAY_DEQUEUE off. Both are
+`#ifdef CONFIG_CACHY` defaults, the same class as the
+swappiness/watermark/split-lock defaults already carried.
+
+Refused on evidence:
+
+- **`93061aa71dab` NAP Governor 0.6.6** — 3,012 lines, a new
+  `CPU_IDLE_GOV_NAP` with `default y`, an 11-32-16 network with scalar/SSE2/
+  AVX2/AVX-512 code paths and an FPU use in the idle path. Its value is energy,
+  and there is no power measurement here (no battery A/B, QEMU has no PMU).
+  Reopen with idle-residency/power numbers on this laptop; until then it is a
+  new subsystem with no evidence and a boot-time selftest.
+- **`17c3dd7d8067` CACHY: sched/fair: Tweak EEVDF for interactivity** — still
+  rejected; BORE replaces the EEVDF pick (section 5.1). Its presence in rc2-2
+  does not change that.
+- **`d2ae21da42b6` Revert "poc-selector"** — a decision, not a pick; we keep POC.
+- **`24634abbcdcc` amdgpu 5K**, **`9c465e8aad04` smu 5300**,
+  **`642ee2d22692` BT Broadcom adv bits** — Apple/iMac and T2-Broadcom
+  hardware.
+- **`707025e74d27` Zen4/x86-64 ISA**, **`8aa5c6dc0368` GCC SMS** — clang plus
+  `-march=native` in the recipe's `KCFLAGS`; a Kconfig `-march=` choice would be
+  overridden by the flags that come after it.
+- **`4958dab4b8fc`, `de9ca7ed8e6a`, `9c5ac595d8a1`, `56daa4d70a8c`,
+  `cd1bc1e37297`, `1d750e7ce49e`, `1bed7f357b0f`, `bd67d9617058`,
+  i915 RC6 ×2, i915 fbdev** — wrong vendor or board (ours is AMD Strix Point;
+  the radio is 13d3:3608, the HID is a Logi Bolt).
+- **Apple T2 / macsmc (48) and Samsung Galaxy Book audio (8)** — not this
+  hardware. The T2 block alone is 48 commits, which is what makes it expensive
+  to carry for no benefit.
+- **tag-release scripts (6), `resolve_btfids` PKGBUILD (1), one repo script** —
+  recipe/repo tooling, not kernel.
+- **`drm/gud` apply + revert pair** — net zero; we carry the revert.
+
+Branches that exist but are **not** in the release (watch, do not pick yet):
+
+| Branch | Tip | What |
+|---|---|---|
+| `7.4/mglru-fg` | `4b6d06b85016` | 17 commits: MGLRU "frequency-guided promotion" (LRU-refs accounting, folio reparenting, khugepaged/madvise conversion). The ledger's MGLRU note says there is no upstream MGLRU work past this base; this is CachyOS's and it is unmerged, so it is not in rc2-2. It would need the fault-latency and reclaim A/B before it could be considered |
+| `7.4/zswap` | `17f8c4bf8ca2` | 3 commits to zswap request handling. Our swap backend is zram, not zswap; not applicable until that changes |
+
+Adaptations found on the matched commits (no action, recorded so the next sync
+does not re-derive them):
+
+- POC uses `rcu_dereference_all()` in our tree where rc2-2 says
+  `rcu_dereference()` — the newer base needs the former.
+- ADIOS's `localversion` hack exists in rc2-2's base commit and is removed by
+  its own `fixup!`; our squashed commit never adds it, so we match the final
+  state.
+- ACS: our squashed commit already contains rc2-2's `fixup!` (10/106/16 lines vs
+  9+1/101+5/0+16 across base+fixup).
+- Pipeliner: our Makefile hunk has the explanatory comment inline; rc2-2 trims
+  it because the GCC SMS commit occupies that spot. Same `-mllvm
+  -enable-pipeliner` flag.
 
 ---
 
