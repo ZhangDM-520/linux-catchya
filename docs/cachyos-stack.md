@@ -14,10 +14,10 @@ Last reviewed: 2026-11-10, against `cachyos-7.4-rc2-2` (`93b4b6f912da`). The
 58 original commits were replayed onto the fork's synced master (torvalds
 master merged at `c463b80881fb`, again at `d48723711bae` on 2026-11-07, and
 again at `6dd60528d55b` on 2026-11-10), and the commits recommended in section 6
-were cherry-picked on top. Current stack on `master`: **65 CachyOS commits +
-6 local kernel commits**, plus 4 `tools/` and 16 `docs/` commits. Two further
-CachyOS picks from `7.4-rc2-2` sit on the topic branch
-`sync/cachyos-7.4-rc2-2` awaiting a build and boot (section 3.10).
+were cherry-picked on top. Current stack: **67 CachyOS commits + 7 local
+kernel commits**, plus 5 `tools/` and 18 `docs/` commits. The two `7.4-rc2-2`
+picks were built and boot-tested on 2026-11-10 before being merged
+(section 3.10).
 
 ---
 
@@ -80,7 +80,7 @@ by what we did with them:
 |---|---:|---:|---|
 | Patch-identical to a commit we carry | 45 | 45 | `git patch-id --stable` equality |
 | Same subject, different patch-id | 4 | 4 | POC (`rcu_dereference_all` adaptation), ADIOS + its fixup (localversion hack, then removed), ACS (fixup already squashed), pipeliner (trimmed beside the GCC SMS commit) |
-| New CachyOS scheduler defaults | 2 | 0 (2 pending) | section 3.10 — on `sync/cachyos-7.4-rc2-2` until built and booted |
+| New CachyOS scheduler defaults | 2 | 2 | section 3.10 — built and boot-checked before merge |
 | Apple T2 / macsmc + Apple-targeted fixes | 48 | 0 | wrong hardware; the largest single block in the release |
 | Samsung Galaxy Book audio + model fixups | 8 | 0 | wrong hardware |
 | Wrong vendor or board | 11 | 0 | i915 RC6 ×2, i915 fbdev, iwlwifi, btusb 13d3:3625, BT for PRIME B650M-A, Dell SOF quirk, Intel remapped NVMe, intel-pstate, VHBA, smu 5300 |
@@ -267,27 +267,40 @@ the same day**: this tree's scheduler is BORE, so the EEVDF block is compiled
 out and the pick was dead code. Its `SCHED_NR_MIGRATE_BREAK 8` hunk went with
 it. Seven picks remain.
 
-### 3.10 Picked from `cachyos-7.4-rc2-2` on 2026-11-10 — topic branch, not yet on master
+### 3.10 Picked from `cachyos-7.4-rc2-2` on 2026-11-10 — built, booted, merged
 
-Two commits, both `#ifdef CONFIG_CACHY` defaults, both cherry-picked with `-x`
-onto `sync/cachyos-7.4-rc2-2` off `2b8643e6b2a8`:
+Two commits, both `#ifdef CONFIG_CACHY` defaults, cherry-picked with `-x` onto
+the branch `sync/cachyos-7.4-rc2-2` (off `5bfc76488dda`, which already carried
+the Full-LTO linker fix, so the trial exercised both together), then merged:
 
-| SHA (branch) | Subject | Source commit | Why |
+| SHA | Subject | Source commit | Why |
 |---|---|---|---|
-| `1d9be3bb9dd1` | CACHY: Change default cgroup_mode to max | `ff4cf904d132` | `calc_group_shares` starts on `calc_max_shares` and `cgroup_mode = 3`; the same "cachymod defaults" class as swappiness 100, watermark boost off and split-lock mitigation off, which this tree already carries |
-| `b7c9c30ccebe` | CACHY: Disable DELAY_DEQUEUE | `d3dd3a45029f` | `DELAY_DEQUEUE` and `DELAY_ZERO` become false under `CONFIG_CACHY` |
+| `c027bfc3a3a2` | CACHY: Change default cgroup_mode to max | `ff4cf904d132` | `calc_group_shares` starts on `calc_max_shares` and `cgroup_mode = 3`; the same "cachymod defaults" class as swappiness 100, watermark boost off and split-lock mitigation off, which this tree already carries |
+| `ee99d848addc` | CACHY: Disable DELAY_DEQUEUE | `d3dd3a45029f` | `DELAY_DEQUEUE` and `DELAY_ZERO` become false under `CONFIG_CACHY` |
+| `cc14a74e38c6` | tools/exp: probe the scheduler defaults this sync carries | — | the runtime check below |
 
-**Status: not on `master`.** The kernel build and the QEMU boot were deferred on
-2026-11-10, and invariant 4 above is that master only carries what has been
-built and booted. Promotion needs:
+**Promotion evidence (2026-11-10).** ThinLTO build with the recipe config,
+`CONFIG_CACHY=y`, and `CLANG_AUTOFDO_PROFILE=afdo.prof`: exit 0, **0 compiler
+warnings**, `.text` 21,261,304 B. QEMU boot with the branch image, probe as
+PID 1:
 
-1. `make O=<dir> LLVM=1` with the recipe config (`CONFIG_CACHY=y`) and clean
-   `kernel/sched/`;
-2. a QEMU boot that runs `tools/exp/sched_defaults_probe.c` — it checks
-   `/sys/kernel/debug/sched/cgroup_mode` is `max`, that `sched/features`
-   contains `NO_DELAY_DEQUEUE` and `NO_DELAY_ZERO`, and that BORE's
-   `base_slice_ns` node exists (the probe is the reason it was written);
-3. a dmesg check for sched warnings after boot.
+```
+PASS cgroup_mode: up smp concur (max) tasks
+PASS DELAY_DEQUEUE: off
+PASS DELAY_ZERO: off
+PASS BORE: /sys/kernel/debug/sched/base_slice_ns present
+PASS sched defaults
+== PASS
+```
+
+`tools/exp/vmtest.sh` also fails on any WARN/BUG/oops in the serial log, so the
+boot was clean; log at `.logs/exp/sched/serial.log`.
+
+The probe's first version expected `/sys/kernel/debug/sched/cgroup_mode` to
+print just `max`; the node actually lists every mode and wraps the active one
+(`up smp concur (max) tasks`), so the check now matches `(max)`. That was a
+probe bug, not a kernel failure — recorded because the same shape will catch
+the next reader.
 
 BORE interaction, checked at the source level: the only `DELAY_DEQUEUE` use is
 `__dequeue_task()` (`kernel/sched/fair.c:8484`), which BORE does not modify, so
@@ -301,7 +314,7 @@ cannot supply one.
 
 ---
 
-## 4. Local deltas (6 kernel commits + the measurement rig, not CachyOS)
+## 4. Local deltas (7 kernel commits + the measurement rig, not CachyOS)
 
 Per-patch detail, including the version-tracking and retirement rules, lives in
 `docs/out-of-tree-patches.md` §3. Summary:
@@ -441,8 +454,8 @@ Method: subject match against the 91 commits we carry outside torvalds, then
 by hardware and mechanism. Counts are in section 2.1, refusals in one line each
 below.
 
-Picked (section 3.10, on `sync/cachyos-7.4-rc2-2` pending build and boot):
-`ff4cf904d132` cgroup_mode=max, `d3dd3a45029f` DELAY_DEQUEUE off. Both are
+Picked (section 3.10, built and booted before merge): `ff4cf904d132`
+cgroup_mode=max, `d3dd3a45029f` DELAY_DEQUEUE off. Both are
 `#ifdef CONFIG_CACHY` defaults, the same class as the
 swappiness/watermark/split-lock defaults already carried.
 

@@ -97,10 +97,12 @@ live under `.logs/`; the durable reference for the patch stack is
   is `cachyos-7.4-rc2-2` (`93b4b6f912da`, 7.4-rc2 + 135 commits); 45 of them
   are patch-identical to what we carry, 4 differ only by base adaptation, and
   the 86 new ones are 48 Apple T2, 8 Samsung, 11 wrong-vendor, 8 repo tooling,
-  2 taken and 9 single-commit refusals. The two sched-defaults picks (cgroup_mode=max,
-  DELAY_DEQUEUE off) sit on `sync/cachyos-7.4-rc2-2` with the build and boot
-  deferred. Separately, the AutoFDO/Propeller fragments dropped every linker
-  profile flag under Full LTO; the guard was verified with a makefile harness
-  and lld, and fixed (ThinLTO output unchanged). See
-  `docs/cachyos-stack.md` §3.10, `docs/out-of-tree-patches.md` §3.7 and
+  2 taken and 9 single-commit refusals. The two sched-defaults picks
+  (cgroup_mode=max, DELAY_DEQUEUE off) were built together with the linker fix
+  on `sync/cachyos-7.4-rc2-2` — 0 warnings, and the QEMU probe read back
+  `(max)`, `NO_DELAY_DEQUEUE`, `NO_DELAY_ZERO` and BORE's node — then merged.
+  Separately, the AutoFDO/Propeller fragments dropped every linker profile
+  flag under Full LTO; the guard was verified with a makefile harness and lld,
+  and fixed (ThinLTO output unchanged). See `docs/cachyos-stack.md` §3.10,
+  `docs/out-of-tree-patches.md` §3.7 and
   `.logs/action-2026-11-10-cachyos-rc2-2-sync.md`.
