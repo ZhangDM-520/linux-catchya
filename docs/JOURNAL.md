@@ -82,3 +82,14 @@ live under `.logs/`; the durable reference for the patch stack is
   so it ships as `tcp_bbr3.ko`. Packaged vmlinuz boot-tested: zero invariant
   PASS, futex placement 0/1000 → 999/1000. See
   `.logs/action-2026-11-07-resync-package.md`.
+- 2026-11-10 — six compiler/kernel-shape tracks closed: ICP moves 0 bytes on
+  the shipped profile and is blocked on profile fidelity (`.text` byte-identical
+  with and without; the profile carries no indirect-target records; the brief's
+  flag names do not exist in LLVM 24), `static_call`/`INDIRECT_CALL` already at
+  its limit (68 sites; `f_op`/`sched_class` are per-instance),
+  `TRIM_UNUSED_KSYMS` refused because the package serves DKMS, MFS shown
+  splitting (1,676 `.cold` halves = 524,351 B into `.text.split`, image
+  +0.054 %, no counters), SIMD verified at runtime
+  (`gcm(aes)` → `generic-gcm-vaes-avx512`), mitigation pruning already at the
+  endpoint. See `docs/out-of-tree-patches.md` §11 and
+  `.logs/action-2026-11-10-optimisation-tracks.md`.

@@ -382,6 +382,12 @@ Where an import waits before it earns a row in section 2. Status flow:
 | GFXOFF hysteresis | this tree | **trialling** | §10.3 | `gfx_off_delay_ms` module parameter; FCLK floor refused (PMFW tables) |
 | Cache-affine futex wake | this tree | **trialling — parked** | §10.4 | `CONFIG_SCHED_FUTEX_AFFINE`; placement proven in QEMU, latency verdict needs hardware |
 | DCN 3.5 atomic-commit pruning | — | **rejected** | §10.5 | no reference patch, dead-display failure mode, benefit unmeasurable in QEMU |
+| LLVM ICP tuning, `CONFIG_PGO_CLANG` | LLVM 24 / kbuild | **blocked — reopen with a branch-stack profile** | §11.1 | named flags absent; ICP changes `.text` by 0 bytes because `afdo.prof` has no indirect-target records; instrumented PGO is a new subsystem |
+| `static_call` / `INDIRECT_CALL_*` sweep | in-tree | **rejected — nothing to import** | §11.2 | 68 hints already placed; `f_op`/`sched_class` dispatch is per-instance and structurally ineligible |
+| `TRIM_UNUSED_KSYMS` | in-tree option | **rejected for the package** | §11.3 | forces `KBUILD_MODULES := y`; Kconfig says "say N if you need out-of-tree modules", and the recipe serves DKMS |
+| Machine function splitting | in-tree AutoFDO stage | **rejected — nothing to import** | §11.4 | already on; 1,676 `.cold` halves = 524,351 B out of the hot region, image +0.054 %; no counter available in QEMU |
+| SIMD specialisation | `lib/crypto`, `lib/crc` | **rejected — nothing to import** | §11.5 | arch paths already in-tree and runtime-dispatched; QEMU `/proc/crypto` check passes on the AEAD tier |
+| Mitigation pruning / kCFI | in-tree config | **rejected — already at endpoint** | §11.6 | mitigation menu off, `CFI` off; kCFI adds a check per indirect call |
 
 A candidate leaves `trialling` with exactly one of: a deterministic-counter win
 above noise, an upstream merge (then it is not an import at all), or a recorded
@@ -630,3 +636,233 @@ candidate is adjacent to firmware handshake state that QEMU does not model;
 (3) the benefit is a latency number on this laptop, unobtainable without the
 GPU. Recorded verdict: **reopen only with an upstream or `amd-staging` commit
 id and a hardware A/B**.
+
+## 11. Compiler and kernel-shape intake verdicts
+
+Requested on 2026-11-10 as a six-item bundle: LLVM mid-end indirect call
+promotion (ICP) with instrumented PGO, call-site patching, whole-kernel
+cross-module tree shaking, basic-block/function splitting, SIMD
+specialisation, and mitigation pruning with low-overhead CFI. As in §10, most
+of the bundle turned into "the tree is already at that endpoint, or the
+mechanism does not exist here" — and the one item that was worth a
+measurement (MFS) was measured.
+
+| # | Item | Verdict | Where |
+|---|---|---|---|
+| 1 | ICP tuning, `CONFIG_PGO_CLANG` | **blocked on the profile** — the named flags do not exist in LLVM 24, and ICP moves **0 bytes** on the shipped profile because it carries no indirect-target records; instrumented PGO **refused** as a new kbuild subsystem | §11.1 |
+| 2 | `static_call` / `INDIRECT_CALL_*` audit | **already applied where possible** — 68 `INDIRECT_CALL_*` sites; the two named paths are ineligible, and the coccinelle pass that would go wider was not run | §11.2 |
+| 3 | `TRIM_UNUSED_KSYMS` | **refused for the shipped package** — the option exists but requires `KBUILD_MODULES := y`, and the recipe must serve DKMS | §11.3 |
+| 4 | Machine function splitting (MFS) | **already on, effect measured (size only)** — 1,676 cold halves (524,351 B) moved out of the hot text region, cost 0.054 % of the image | §11.4 |
+| 5 | SIMD specialisation | **already at the endpoint** — arch paths are in `lib/crypto`, runtime check passes | §11.5 |
+| 6 | Mitigation pruning, low-overhead CFI | **already at the endpoint** — the menu is off and kCFI is a cost, not a saving | §11.6 |
+
+Ground rule for every row: a verdict needs a number or a line, not a
+plausibility argument. Where the number cannot be produced on this machine
+(i-cache/BTB counters), the row says what is *not* claimed.
+
+### 11.1 ICP tuning and instrumented PGO — blocked on the profile, PGO refused
+
+Two separate asks; neither produces a shipped knob at this base, for different reasons.
+
+**The named flags do not exist.** `-icp-cutoff-for-hot-callsite`,
+`-icp-max-promoted-targets` and `-icp-inline` return nothing from
+`opt --help-hidden` on clang/LLVM 24. The real knobs are:
+
+| Requested | Actual in LLVM 24 |
+|---|---|
+| `-icp-cutoff-for-hot-callsite=<N>` | `-icp-minimum-count-threshold=<N>`, `-sample-profile-icp-relative-hotness=<N>` |
+| `-icp-max-promoted-targets=<N>` | `-icp-max-prom=<N>`, `-sample-profile-icp-max-prom=<N>` |
+| `-icp-inline=<bool>` | none; promotion/inlining are separate decisions (`-icp-allow-hot-only`, `-enable-vtable-profile-use`) |
+| — | `-disable-icp` (the A/B lever) |
+
+**`CONFIG_PGO_CLANG` does not exist.** `git grep PGO_CLANG -- ':!docs'` is
+empty on this tree and on `upstream/master`; `CONFIG_AUTOFDO_CLANG`
+(sample-based) is the only profile input the build system has.
+
+**ICP moves zero bytes on this profile.** Three full ThinLTO builds from the
+same AutoFDO reserve profile (`afdo.prof`), same config, same `KCFLAGS`:
+
+| Arm | extra flags | `.text` | text | data | bss | functions |
+|---|---|---|---|---|---|---|
+| baseline | — | 21,265,272 | 38,328,518 | 15,968,813 | 4,734,976 | 100,258 |
+| ICP on | `-sample-profile-icp-max-prom=8 -sample-profile-icp-relative-hotness=50` | 21,265,272 | 38,328,518 | 15,968,813 | 4,734,976 | 100,258 |
+| ICP off | `-disable-icp` | 21,265,272 | 38,328,518 | 15,968,813 | 4,734,976 | 100,258 |
+
+Not just equal sizes: `objcopy -O binary --only-section=.text` of the baseline
+and of the `-disable-icp` build hash identically (sha256
+`0adfad8ff6855c3c…`), so there is not one promoted callsite to point at.
+
+Why zero, and what would change it: LLVM's sample-profile loader *can* promote
+indirect calls, from the indirect-branch-target records a profile carries —
+that is what `-sample-profile-icp-max-prom` and
+`-sample-profile-icp-relative-hotness` are for. The 0-byte result says
+`afdo.prof` has no target data, not that ICP is useless: the recipe builds that
+profile through the `~/.reserve/Kernel_PGO/` fallback because the microVM
+cannot produce LBR records (`.logs/action-2026-11-07-resync-package.md`), so
+the profile is a flat sample set with no branch stacks. The honest verdict is
+therefore **blocked on profile fidelity, not refused on merit**: re-collect
+with branch stacks (`perf record -b` under the profile guest, then the same
+`create_llvm_prof` step), re-run the three arms above, and only then can the
+knob be judged. Until that profile exists there is nothing to tune, so no
+knob is shipped.
+
+Instrumented PGO stays refused for a different reason: porting
+`CONFIG_PGO_CLANG` at this base is a new kbuild subsystem (instrumented build,
+profile merge, per-config invalidation) that collides with the ThinLTO +
+Propeller pipeline and roughly doubles build time before it can be evaluated.
+
+### 11.2 Call-site patching — already applied where possible
+
+The tree already has the infrastructure and uses it:
+
+| Fact | Value |
+|---|---|
+| Config | `CONFIG_JUMP_LABEL=y`, `CONFIG_HAVE_STATIC_CALL=y`, `CONFIG_HAVE_STATIC_CALL_INLINE=y` |
+| `static_call` in use | 25 plain `DEFINE_STATIC_CALL(` and 78 including the `_NULL`/`_RET`/`_TRAMP` variants (`git grep -oE 'DEFINE_STATIC_CALL[A-Z_]*\(' -- '*.c'`); 138 `static_call_update(` sites (`git grep -oE 'static_call_update\(' -- '*.c'`) |
+| Dispatch hints in use | 68 `INDIRECT_CALL_*` sites across 31 files (`git grep -oE 'INDIRECT_CALL_[0-9]+\(' -- . ':!docs' ':!include/linux/indirect_call_wrapper.h'`), e.g. `net/ipv4/af_inet.c:864` (`sendmsg`) and `:892` (`recvmsg`) already do `INDIRECT_CALL_2(prot->recvmsg, tcp_recvmsg, udp_recvmsg, …)` |
+
+The paths the brief names are the ones that cannot be converted:
+
+- `file->f_op->read_iter` (`fs/read_write.c:493,532`) has 74 assignment sites
+  in `fs/` (`git grep -E '\bread_iter[[:space:]]*=[[:space:]]*' -- fs/`):
+  the target set is unbounded at compile time, so `INDIRECT_CALL` does not
+  apply (its targets must be a fixed list) and `static_call` cannot either.
+- `p->sched_class->enqueue_task` (`kernel/sched/core.c:2221`) is dispatch on
+  an instance, and `sched_ext` registers a class at runtime; patching a call
+  site per instance is not what `static_call` does.
+
+`spatch` is not installed on this machine, so the audit was grep-based and
+WP2 is **partial by construction**: the candidate register above records the
+two paths the brief named and why each is ineligible, but no assign-once list
+for file-scope function pointers exists. Producing one needs `coccinelle`
+packaged and a semantic patch over `fs/` and `kernel/sched/`; until then the
+claim is limited to "the named paths cannot be converted", not "nothing in the
+tree can be". No conversion is proposed: with 68 hints already in place and
+both named paths structurally ineligible, there is no window left to patch.
+
+### 11.3 `TRIM_UNUSED_KSYMS` — refused for the shipped package
+
+The mechanism exists in this tree and is not enabled: the option is
+`kernel/module/Kconfig:431`, and it is the only consumer of the whitelist
+machinery in `scripts/Makefile.modpost:100` (`modpost-args += -t $(addprefix
+-u , $(ksym-wl))`). Enabling it forces `KBUILD_MODULES := y`
+(`Makefile:1352-1354`) because the kernel must build every module first to
+learn which exports are used.
+
+That is the refusal: Kconfig itself says, directly under the option, *"If
+unsure, or if you need to build out-of-tree modules, say N."* This recipe
+exists to serve out-of-tree modules — `dkms-clang.patch` is always applied and
+the package can build `nvidia-open`, `zfs` and `r8125` against the installed
+tree. Trimming exports would leave those modules unable to resolve symbols,
+while `MODULE_SIG_FORCE` is absent precisely so third-party modules load
+today. A size win that breaks the package's reason for existing is not a win;
+no build was spent on it.
+
+### 11.4 Machine function splitting — already on, effect measured
+
+MFS is enabled by the AutoFDO stage and has been all along:
+`scripts/Makefile.autofdo:15` adds `-fsplit-machine-functions` whenever
+`CLANG_AUTOFDO_PROFILE` is set, and `:25` adds the matching
+`-plugin-opt=-split-machine-functions` at ThinLTO link. The cold half of a
+split function lands in the kernel's `TEXT_SPLIT` region
+(`include/asm-generic/vmlinux.lds.h:574`, inside `.text`).
+
+A/B on 2026-11-10: same tree, same `afdo.prof`, same `KCFLAGS`, MFS off by
+commenting those two lines and restoring them byte-identically afterwards:
+
+| Metric | MFS on | MFS off | Δ |
+|---|---|---|---|
+| `.text` | 21,265,272 | 21,240,696 | +24,576 (+0.116 %) |
+| `.text.split` cold region | 524,351 | 0 | +524,351 |
+| `.text.hot` region | 1,262,158 | 1,734,902 | −472,744 |
+| `.text.unlikely` region | 383,976 | 383,975 | +1 |
+| `.rodata` | 9,327,653 | 9,286,693 | +40,960 |
+| text+data | 622,469,232 | 622,137,547 | +331,685 (+0.053 %) |
+| `vmlinux` file | 639,420,896 | 639,076,776 | +344,120 |
+| function symbols | 100,258 | 98,582 | +1,676 |
+
+The 1,676 extra symbols are all `<func>.cold` (`nm` symbol-set difference),
+and every one of them sits inside `__split_text_start..__split_text_end` — so
+MFS is doing what it is for: 524,351 B of cold code is pulled out of the
+profile-hot region (which drops by 472,744 B) into a contiguous cold region,
+against a 0.054 % larger image.
+
+Two traps recorded because they cost time: `.text.unlikely` is **not** the
+region to measure (1 byte difference — it holds `__cold`/`-ffunction-sections`
+output and is indifferent to MFS), and whole-image hashes are not a valid
+comparison across builds.
+
+**Not claimed:** any i-cache or BTB improvement, and therefore half of WP4's
+gate. The plan asked for `.text`, `instructions:k`, `L1-icache-load-misses`
+and boot time; only the size column was produced. QEMU has no PMU, so the
+counter half needs both arms booted on the laptop through the `tools/exp/`
+rig and a `perf stat` A/B — a kernel-install-and-reboot cycle that was not
+performed here. MFS stays on (today's arm), because no measurement shows the
+other arm wins and the split is the only mechanism producing a cold region at
+all; the counter A/B is the reopen condition for this row.
+
+### 11.5 SIMD specialisation — already at the endpoint
+
+Three of the four sub-asks are impossible or already done:
+
+1. C cannot use the FPU: `arch/x86/Makefile:76` puts `-mno-sse -mno-mmx
+   -mno-sse2 -mno-3dnow -mno-avx -mno-sse4a` on `KBUILD_CFLAGS`. The
+   recipe's `-mprefer-vector-width=256` is therefore inert for ordinary C and
+   matters only in the hand-written SIMD translation units that opt back in.
+2. CRC already is the new framework: `lib/crc/x86/` carries
+   `crc32c-3way.S`, `crc32-pclmul.S` and `crc64-pclmul.S`, dispatched at
+   runtime, with `CONFIG_CRC_OPTIMIZATIONS=y`, `CRC32_ARCH=y`, `CRC64_ARCH=y`.
+3. The audited `CRYPTO_*_X86_64` / `*_SSSE3` Kconfig symbols do not exist any
+   more (`git grep "config CRYPTO_CRC32C_INTEL" -- ':!docs'` and the other
+   seven: no matches). Those implementations were folded into `lib/crypto`
+   behind static keys.
+
+Runtime check, `tools/exp/crypto_probe.c` as PID 1 under QEMU, with the
+`=m` crypto modules packed and loaded (2026-11-10):
+
+```
+cpuflags aes=1 sha_ni=1 vaes=1 avx2=1 avx512f=1 pclmulqdq=1
+PASS module 01-gf128mul.ko … 05-aesni-intel.ko
+PASS crypto gcm(aes) generic-gcm-vaes-avx512 prio=800 (tier vaes-avx512, best available vaes-avx512)
+INFO crypto aes      aes-lib prio=100 (lib wrapper, tier is a static-key branch)
+INFO crypto sha256   sha256-lib prio=300 (lib wrapper, tier is a static-key branch)
+INFO crypto chacha20 chacha20-lib prio=300 (lib wrapper, tier is a static-key branch)
+```
+
+Only `gcm(aes)` can be answered from `/proc/crypto`: `aesni-intel` registers
+one algorithm per tier and the highest priority wins, which is the tier the
+boot landed on. The probe mirrors the registration gates
+(`aesni-intel_glue.c`) rather than a single feature word — `vaes-avx512` needs
+AVX2, VAES, AVX512BW/VL, BMI2 and PCLMULQDQ, and `PREFER_YMM` demotes the
+AVX-512 entry, so a `vaes-avx2` win on an AVX-512 part is correct. It passes on
+any tier the CPU can run and fails only on a fallback to generic C, which is
+the failure this check exists to catch. `aes`, `sha256` and `chacha20` have a
+single registration — the lib wrapper — and pick their arch path through a
+static key inside the call (`have_aesni`, `have_vaes_avx512`, `have_vaes_avx2`
+in `lib/crypto/x86/aes.h`; the sha256/chacha headers are the same shape). The
+probe therefore prints the wrapper and the CPU features that gate the key and
+claims nothing more; a name-based "is it accelerated?" test is the wrong
+instrument on this base, which is why the first version of the probe reported
+false failures. `CONFIG_CRYPTO_LIB_*_ARCH=y` for AES, SHA256, SHA512, CHACHA,
+POLY1305 and BLAKE2S is what puts the asm in the image.
+
+New AVX-512/VAES routines are refused: upstream owns them, AES-GCM already
+lands in `generic-gcm-vaes-avx512` here, and a hand-written path is a
+permanent correctness and rebase liability with no measurement to justify it.
+
+### 11.6 Mitigation pruning and low-overhead CFI — already at the endpoint
+
+The premise is inverted at this base:
+
+| Fact | Evidence |
+|---|---|
+| No software retpolines to prune | `_cpu_mitigations=off` is the recipe default (`PKGBUILD:361`); the final config has no `CONFIG_MITIGATION_RETPOLINE`, `MITIGATION_RETHUNK`, `MITIGATION_SLS`, `RETPOLINE` or `CFI_CLANG` symbol at all |
+| Rethunk costs AMD nothing anyway | `apply_returns()` rewrites `JMP __x86_return_thunk` into a plain `ret` at boot when `!cpu_feature_enabled(X86_FEATURE_RETHUNK)` (`arch/x86/kernel/alternative.c:1024-1035,1066,2291`) |
+| kCFI is a cost, not a saving | `CONFIG_CFI` is not set; enabling it adds a type-hash per indirect call, and FineIBT needs the mitigation menu — the opposite of pruning |
+| `DEBUG_PREEMPT` already off | `CONFIG_DEBUG_PREEMPT` not set; `PREEMPT_COUNT=y` is required by `PREEMPT_LAZY` and cannot be stripped |
+
+Stripping `TRACEPOINTS`, `FTRACE` or `SLUB_DEBUG` removes features: they are
+the observability this tree's measurement discipline rests on (and
+`bpftrace`/`perf` need the first two). `SLUB_DEBUG=n` is the only plausible
+remaining A/B and it has no counter behind it yet, so it is not run.
+
