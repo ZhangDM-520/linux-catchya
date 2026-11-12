@@ -106,3 +106,18 @@ live under `.logs/`; the durable reference for the patch stack is
   and fixed (ThinLTO output unchanged). See `docs/cachyos-stack.md` §3.10,
   `docs/out-of-tree-patches.md` §3.7 and
   `.logs/action-2026-11-10-cachyos-rc2-2-sync.md`.
+
+- 2026-11-12 — diagnosed the AutoFDO + Propeller `vmlinux.o` failure
+  (`objtool: __io_timeout_prep+0x1d2: can't find switch jump table`): Clang's
+  dangling jump-table entries point one past the end of the *basic-block-split
+  cold* section, which the upstream "Ignore dangling jump table entries"
+  tolerance (`pfunc->offset + pfunc->len`) does not cover. `dad82eb1805d` is
+  in rc1 too, so this is not an rc2 regression. Fix extends the check to
+  `cfunc`; verified green on the failing link, no regression in the objtool
+  suite (50/50) — see `.logs/action-2026-11-12-objtool-cold-jump-table.md`.
+- 2026-11-12 — `tools/objtool-cold-jump-table` (`365d3e25312b`): the `cfunc`
+  dangling-entry tolerance above, guarded so it only fires when the cold
+  symbol reaches its section end (a split section can hold more than one cold
+  fragment, and an interior fragment's end is live code). Ledger row 11 and
+  section 3.8 in `docs/out-of-tree-patches.md`. Upstream submission held until
+  the owner runs the real `makepkg`.

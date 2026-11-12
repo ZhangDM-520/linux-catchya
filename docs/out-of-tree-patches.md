@@ -52,6 +52,7 @@ recipe), **retired** (removed, kept only as a note in section 8).
 | 8 | Idle pre-zeroing | trialling | `8b143fc6fce5` (7 files) | none | **medium** — `mm/page_alloc.c` alloc and free hot paths |
 | 9 | GFXOFF entry delay knob | trialling | `ad910e9156c0` (1 file) | none — a tunable, not a fix | low — `amdgpu_gfx.c` only |
 | 10 | Cache-affine futex wake | trialling (parked) | `3b3d58b1ad9f` (6 files) | none — no reference patch exists | **medium** — `select_task_rq_fair()`, `wake_up_q()` |
+| 11 | objtool: dangling jump table in split cold sections | carried | `365d3e25312b` (1 file) | should go upstream | low — `tools/objtool/check.c` only |
 
 Rows 7 and 8 cite the integration-chain commits. The standalone topic
 branches carry the same diffs rebased onto `master` - `mm/thp-async-defrag`
@@ -288,6 +289,62 @@ backend. The profile flags themselves are generic LTO codegen options.
 `CONFIG_LTO_CLANG_THIN=y`; the harness shows the Thin arm's flag sequence is
 unchanged, so the binary is unchanged. The fix matters for anyone selecting
 Full LTO, and for the upstream tree.
+
+### 3.8 objtool: dangling jump table in split cold sections — `365d3e25312b`
+
+| Fact | Value |
+|---|---|
+| Our commit | `365d3e25312b`, branch `tools/objtool-cold-jump-table`, 1 file, +12 −0 |
+| Provenance | written here (2026-11-12). Extends upstream `3724062ca2b1` ("objtool: Ignore dangling jump table entries", Josh Poimboeuf, 2025-01-14), which added the `pfunc->offset + pfunc->len` tolerance but predates Clang emitting the same entries past a basic-block-split cold section |
+| Touch surface | `tools/objtool/check.c`, `add_jump_table()` only — one extra `goto next`. No compile flags, no codegen |
+| Upstream status | unfixed in torvalds master at `b487ff2e417d`; not yet submitted |
+| Measurement | on the failing 7.4-rc2 AutoFDO + Propeller + ThinLTO `vmlinux.o` link: objtool exit 255 → 0, with the non-split link unchanged at 0 in both cases; `tools/objtool/tests/run-tests.sh` (`CC=clang`, `ARCH=x86_64`) 50 pass / 0 fail / 1 static skip / 1 probe skip both before and after. Not measured: an end-to-end `makepkg`, and Full LTO end-to-end |
+| Storage | commit on master — `tools/` only, no kernel code reached at runtime |
+| Retirement | upstream applies the equivalent `cfunc` check |
+
+**The bug.** Clang emits a dense `switch` as a jump table in `.rodata.<func>`
+and sometimes leaves dangling unused entries pointing at the end of the
+function. `3724062ca2b1` tolerates those when the offset is
+`pfunc->offset + pfunc->len`. With `-fbasic-block-sections=<profile>`
+(Propeller) the cold blocks move to `.text.split.<func>`, carried by a
+`__func.cold` symbol that objtool adopts as the parent's `cfunc`, and the same
+entries point one past the end of *that* section. `find_insn()` finds nothing
+there, the loop breaks before recording a single table entry, and
+`add_jump_table()` fails the whole object:
+
+```
+vmlinux.o: error: objtool: __io_timeout_prep+0x1d2: can't find switch jump table
+```
+
+**Measured shape.** `io_uring/timeout.c` inlines `io_flags_to_clock()` into
+`__io_timeout_prep()`, whose table carries 27 dangling entries. Without
+basic-block sections they sit at `pfunc->offset + pfunc->len` `0x362` and are
+tolerated; with the split they sit at `cfunc->offset + cfunc->len` `0x138` and
+are not. The same pattern is present in `ep_poll_callback` (2 entries, cold end
+`0xd2`) and `do_jit` (105 entries, cold end `0x529f`).
+
+**Why this is not the rc2 source move.** `git merge-base --is-ancestor
+dad82eb1805d v7.4-rc1` succeeds and `io_uring/timeout.c` is byte-identical
+between `cachyos-7.4-rc1-1` and `HEAD`. The trigger is the Propeller profile,
+not the base bump.
+
+**Why the tolerance cannot mask a real defect.** A split section can hold more
+than one cold fragment: `t_show.cold` (len 105) ends at `0x221`, which is the
+start of the next `t_show.cold` fragment, so a bare
+`cfunc->offset + cfunc->len` test would skip live code there. The guard
+therefore also requires the cold symbol to run to the end of its section
+(`sec_size(cfunc->sec) == cfunc->offset + cfunc->len`), which no interior
+fragment satisfies. In the failing object this condition holds for all three
+affected functions (`__io_timeout_prep`, `ep_poll_callback`, `do_jit`) and
+fails for the four interior-fragment offsets (`t_show` ×2,
+`process_fetch_insn` ×2), and zero jump-table entries resolving to a different
+`pfunc` are accepted anywhere, so no live entry is skipped.
+
+Pruning the profile instead (`Option 2`) was measured and is whack-a-mole:
+removing only the `__io_timeout_prep` stanza moves the failure to
+`io_timeout_remove.cold+0x24b`, and 12,182 `.text.split.*` sections remain.
+`-fno-jump-tables` also works but is a global codegen change made to dodge a
+tool limitation.
 
 ---
 
