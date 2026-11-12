@@ -2053,9 +2053,21 @@ static int add_jump_table(struct objtool_file *file, struct instruction *insn)
 		/*
 		 * Clang sometimes leaves dangling unused jump table entries
 		 * which point to the end of the function.  Ignore them.
+		 *
+		 * With basic-block sections the cold blocks live in their own
+		 * section, so the same dangling entries point one past the end
+		 * of that section instead.  Only trust the cold end as
+		 * "dangling" when the cold symbol runs to the end of its
+		 * section: a section can hold more than one cold fragment, and
+		 * an entry pointing at the next one is live code.
 		 */
 		if (reloc->sym->sec == pfunc->sec &&
 		    sym_offset == pfunc->offset + pfunc->len)
+			goto next;
+		if (pfunc->cfunc && reloc->sym->sec == pfunc->cfunc->sec &&
+		    sec_size(pfunc->cfunc->sec) ==
+				pfunc->cfunc->offset + pfunc->cfunc->len &&
+		    sym_offset == pfunc->cfunc->offset + pfunc->cfunc->len)
 			goto next;
 
 		dest_insn = find_insn(file, reloc->sym->sec, sym_offset);
