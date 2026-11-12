@@ -119,5 +119,6 @@ live under `.logs/`; the durable reference for the patch stack is
   dangling-entry tolerance above, guarded so it only fires when the cold
   symbol reaches its section end (a split section can hold more than one cold
   fragment, and an interior fragment's end is live code). Ledger row 11 and
-  section 3.8 in `docs/out-of-tree-patches.md`. Upstream submission held until
-  the owner runs the real `makepkg`.
+  section 3.8 in `docs/out-of-tree-patches.md`; merged to `master` as
+  `11289fb133d9`. Upstream submission held until the owner runs the real
+  `makepkg`.
