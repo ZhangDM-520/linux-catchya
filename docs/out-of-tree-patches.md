@@ -50,15 +50,17 @@ recipe), **retired** (removed, kept only as a note in section 8).
 | 6 | NVIDIA open patches | build-time | `kernel-patches/<major>/misc/nvidia/*` | none | **high** — version-scoped |
 | 7 | THP async defrag | trialling | `90c8b34dd9df` (3 files) | none — a policy default, not submitted | low — `mm/huge_memory.c` defrag default, `should_compact_retry()` |
 | 8 | Idle pre-zeroing | trialling | `8b143fc6fce5` (7 files) | none | **medium** — `mm/page_alloc.c` alloc and free hot paths |
-| 9 | GFXOFF entry delay knob | trialling | `ad910e9156c0` (1 file) | none — a tunable, not a fix | low — `amdgpu_gfx.c` only |
-| 10 | Cache-affine futex wake | trialling (parked) | `3b3d58b1ad9f` (6 files) | none — no reference patch exists | **medium** — `select_task_rq_fair()`, `wake_up_q()` |
+| 9 | GFXOFF entry delay knob | trialling | `50553fea7216` (1 file) | none — a tunable, not a fix | low — `amdgpu_gfx.c` only |
+| 10 | Cache-affine futex wake | trialling (parked) | `d3174f9cb969` (6 files) | none — no reference patch exists | **medium** — `select_task_rq_fair()`, `wake_up_q()` |
 | 11 | objtool: dangling jump table in split cold sections | carried | `365d3e25312b` (1 file) | should go upstream | low — `tools/objtool/check.c` only |
 
-Rows 7 and 8 cite the integration-chain commits. The standalone topic
-branches carry the same diffs rebased onto `master` - `mm/thp-async-defrag`
-(`dc45cc033153`) and `mm/prezero-pages` (`6cf964b4461d`) - so either SHA
-reproduces the change; the topic-branch SHAs differ only because they do not
-carry the harness commits that precede them on the integration chain.
+Rows 7 to 10 cite the commits that are reachable from `master`. Each also
+existed on a topic branch carrying the same diff rebased onto an older
+`master`, which is why the topic-branch SHAs differ: they do not carry the
+harness commits that precede them on the integration chain, and they were
+deleted once their content landed. If a row ever needs its branch-side twin,
+`git log -S '<distinguishing symbol>'` finds it again; the branch name is no
+longer a ref, so do not cite one.
 
 Not a patch, kept for completeness: `8e1a563686be` `tools/exp/` (A/B and kexec
 campaign harness), extended by `61e1870a62df` with the fault-latency and QEMU
@@ -690,7 +692,7 @@ the memory controller do with the resulting placement — hardware, not QEMU.
 
 | Fact | Value |
 |---|---|
-| Our commit | `ad910e9156c0` (topic branch `amd/gfxoff-knob`), 1 file, +27 −3 |
+| Our commit | `50553fea7216`, 1 file, +27 −3. Authored on the `amd/gfxoff-knob` topic branch, which carried the same diff rebased onto an older `master` and was deleted once this landed |
 | Provenance | written here (2026-11-07). It replaces one constant, `GFX_OFF_DELAY_ENABLE` = `msecs_to_jiffies(100)` (`amdgpu_gfx.c:42`), with a parameter of the same default |
 | Touch surface | `drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.c` only — the parameter, and the delay read in `amdgpu_gfx_do_off_ctrl()` |
 | Upstream status | none, not submitted: it is a tunable, not a fix. FCLK/MCLK floors were refused — they live in PMFW tables (`smu14_driver_if_*.h`) and editing them is a firmware interface change |
@@ -703,7 +705,7 @@ the memory controller do with the resulting placement — hardware, not QEMU.
 
 | Fact | Value |
 |---|---|
-| Our commit | `3b3d58b1ad9f` (topic branch `sched/futex-affine`), 6 files, +142 −4 |
+| Our commit | `d3174f9cb969`, 6 files, +142 −4. Authored on the `sched/futex-affine` topic branch, which carried the same diff rebased onto an older `master` and was deleted once this landed |
 | Why it is not a backport | no upstream or vendor patch exists. `futex_wake()` batches with `wake_q_add()` and flushes with `wake_up_q()`, which passes no wake flags (`kernel/futex/waitwake.c:228,362`), so `select_task_rq_fair()` cannot know the wakee shares the futex word with the waker |
 | Mechanism | `WAKE_Q_FUTEX` (wake_q.h) → `wake_up_q_flags()` → `WF_FUTEX` (sched.h) → `futex_affine_cpu()` in `fair.c`: if the waker and the wakee's previous CPU are in different LLCs, look for an idle CPU in the waker's LLC with the existing `select_idle_cpu()`; otherwise return −1 and keep the normal placement. Behind `CONFIG_SCHED_FUTEX_AFFINE` (default n) and a static key, with `/proc/sys/kernel/sched_futex_affine` for A/B |
 | Guards | `cpumask_test_cpu(waker, p->cpus_ptr)` before any mask read; `select_idle_cpu()` itself returns −1 on an empty intersection (absence of `sd_llc` also returns −1); the hint can only move a wakee onto a CPU that was already idle |
