@@ -134,3 +134,11 @@ live under `.logs/`; the durable reference for the patch stack is
   and `zswap` (3) branches are dev-only and enter the candidate register as
   `watching`, `t2` (49) is rejected as wrong hardware — see
   `docs/cachyos-stack.md` §2.2 and `.logs/action-2026-11-13-upstream-sync.md`.
+- 2026-11-14 — branch sweep: every one of the 12 topic and sync branches was
+  already on `master` (the rc3 merge absorbed them), so nothing needed merging
+  and the real gap was that `master` had never been pushed (456 commits
+  unpublished). Ledger rows 9 and 10 cited branch-only SHAs and were repointed
+  to their master-side twins (`50553fea7216`, `d3174f9cb969`) **before** the
+  branches went, so no citation depends on a ref that no longer exists. All 12
+  local and 8 remote topic branches deleted, `master` pushed as `a88ab7d77bc1`;
+  `fsck` clean. See `.logs/action-2026-11-14-branch-sweep.md`.
