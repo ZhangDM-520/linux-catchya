@@ -188,8 +188,18 @@ Without it, `make prepare` dies at `RUSTC L rust/core.o` with
 dies at the LLVM argument. Both were measured on rustc 1.101.0-nightly /
 LLVM 24.0.0; see `.logs/action-2026-11-06-autofdo-rust-flags.md`.
 
-**Retire when** the equivalent lands in `scripts/Makefile.autofdo` upstream
-(mainline already fixed the linker half in `2b358510d5cc`).
+**Half retired 2026-11-13.** Upstream `1178120c3bed` ("kbuild: rust: support
+stabilized flag `-Cprofile-sample-use` for Rust >= 1.100", Miguel Ojeda) landed
+the Rust flag rename at the 7.4-rc3 sync, using the same
+`rustc-min-version,110000` gate. The commit is kept as a merge because the LLVM
+24 half is still ours: upstream still writes
+`-Cllvm-args=-split-machine-functions`, which LLVM 24 rejects, and our
+`rustc-option` probe remains the only thing that fixes it. The commit body now
+describes one upstream-merged change and one local one; splitting it would
+break bisectability, so it stays whole.
+
+**Retire when** upstream also probes the Rust function-splitting spelling, i.e.
+`scripts/Makefile.autofdo` matches ours on both lines.
 
 ### 3.5 THP async defrag — `CONFIG_THP_ASYNC_DEFRAG`
 
@@ -460,6 +470,9 @@ Where an import waits before it earns a row in section 2. Status flow:
 | Candidate | Source | Status | Measurement | Notes |
 |---|---|---|---|---|
 | MGLRU aggressive tuning / backports | mainline `LRU_GEN*`, tuned by `CONFIG_CACHY` | **rejected — nothing to import** | in-tree and already on: `LRU_GEN=y`, `LRU_GEN_ENABLED=y`, caps `0x0007` (`CORE\|MM_WALK\|NONLEAF_YOUNG`), `swappiness` 100 | No MGLRU commit landed upstream after our base (`git log c463b80881fb..upstream/master --grep lru_gen` is empty), so there is no backport to take. The one real finding is a unit bug: `lru_gen_min_ttl` is 100 **jiffies**, so the protection window silently follows `_HZ_ticks` — 334 ms at the validation build's HZ=300, 166 ms for the HZ=600 package. It is a 2-line change (`HZ / 6`) *if* a measurement ever shows the HZ-scaled window is wrong; no measurement does, so no patch is carried |
+| MGLRU-FG (frequency guided promotion) | CachyOS `7.4/mglru-fg` (Kairui Song, 17 commits) | **watching** | none — no probe covers workingset promotion | Not in the release (`7.4/base` does not contain the branch) and not upstream; rewrites MGLRU generation accounting in `mm/vmscan.c` (+528) and `mm/folio.c`, based on 7.4-rc2. Reopens the July decision that tuning MGLRU through `CONFIG_CACHY` is enough: as a vendor feature rather than a backport it is a different question, but it needs a hit-rate or refault counter first. See `docs/cachyos-stack.md` §2.2 |
+| zswap separate compress/decompress requests | CachyOS `7.4/zswap` (Usama Arif, Herbert Xu, 3 commits) | **watching** | none — the rig has no swap-latency probe | Not in the release and not upstream; `mm/zswap.c` (+163) plus a `MAX_SYNC_COMP_REQSIZE` acomp cap. zram/zswap with zstd is live on this laptop, so it is measurable in principle, but a synchronous-decompression change needs a probe `tools/exp/` does not have |
+| Apple T2 stack | CachyOS `7.4/t2` (49 commits) | **rejected** | n/a | Wrong hardware, the same class the release already excludes (48 commits, `docs/cachyos-stack.md` §2.1). Contains one untrialled `amdgpu: add support for 5K`, refused on the §10.5 precedent: no reference patch, dead-display failure mode |
 | THP async defrag | this tree | **trialling** | §3.5 | `CONFIG_THP_ASYNC_DEFRAG` |
 | Idle page pre-zeroing | this tree | **trialling** | §3.6 | `CONFIG_PREZERO_PAGES` |
 | `ntsync` | mainline since 6.14 | **rejected — nothing to import** | §10.1 | only the config assertion and a QEMU ioctl probe were missing |

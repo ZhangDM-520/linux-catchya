@@ -122,3 +122,15 @@ live under `.logs/`; the durable reference for the patch stack is
   section 3.8 in `docs/out-of-tree-patches.md`; merged to `master` as
   `11289fb133d9`. Upstream submission held until the owner runs the real
   `makepkg`.
+- 2026-11-13 — synced to torvalds `7e1392a42ea2` (449 commits, post-7.4-rc3;
+  merge `ebf767aef3d3`). Three conflicts, all composed rather than chosen:
+  `mm/page_alloc.c` (upstream's cached `preferred_zone` + our `&prezeroed`),
+  `net/ipv4/tcp.c` (`fast_ack_mode` + `rcv_collapse_credit`), and
+  `scripts/Makefile.autofdo` (upstream `1178120c3bed` stabilized the Rust
+  profile flag; our LLVM 24 `-function-splitting` probe is still needed, so the
+  local commit keeps half retirable). Full LTO + AutoFDO + Propeller build
+  exits 0 and `tools/exp/vmtest.sh` reports PASS. CachyOS has **no new release**
+  (`7.4/base` still `93b4b6f912da`, newest tag still rc2-2); its `mglru-fg` (17)
+  and `zswap` (3) branches are dev-only and enter the candidate register as
+  `watching`, `t2` (49) is rejected as wrong hardware — see
+  `docs/cachyos-stack.md` §2.2 and `.logs/action-2026-11-13-upstream-sync.md`.
