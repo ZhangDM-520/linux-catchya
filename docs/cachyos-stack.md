@@ -10,14 +10,16 @@ carries that torvalds/linux does not have and this book does not own — BORE,
 the POC selector, our own fixes, and the patches the recipe applies at build
 time.
 
-Last reviewed: 2026-11-10, against `cachyos-7.4-rc2-2` (`93b4b6f912da`). The
-58 original commits were replayed onto the fork's synced master (torvalds
-master merged at `c463b80881fb`, again at `d48723711bae` on 2026-11-07, and
-again at `6dd60528d55b` on 2026-11-10), and the commits recommended in section 6
-were cherry-picked on top. Current stack: **67 CachyOS commits + 7 local
-kernel commits**, plus 5 `tools/` and 18 `docs/` commits. The two `7.4-rc2-2`
-picks were built and boot-tested on 2026-11-10 before being merged
-(section 3.10).
+Last reviewed: 2026-11-13, against `cachyos-7.4-rc2-2` (`93b4b6f912da`) and
+torvalds master at `7e1392a42ea2` (post-7.4-rc3). The 58 original commits were
+replayed onto the fork's synced master (torvalds master merged at
+`c463b80881fb`, again at `d48723711bae` on 2026-11-07, again at `6dd60528d55b`
+on 2026-11-10, and again at `7e1392a42ea2` on 2026-11-13), and the commits
+recommended in section 6 were cherry-picked on top. Current stack: **67 CachyOS
+commits + 7 local kernel commits**, plus 6 `tools/` and 19 `docs/` commits. The
+two `7.4-rc2-2` picks were built and boot-tested on 2026-11-10 before being
+merged (section 3.10). The 2026-11-13 sync found no new release; §2.2 records
+what the dev branches carry and why none was taken.
 
 ---
 
@@ -33,7 +35,7 @@ master = torvalds master (merged into the fork at 6dd60528d55b, post-7.4-rc2)
 
 | Item | Value |
 |---|---|
-| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master merged upstream at c463b80881fb, at d48723711bae (2026-11-07), and at 6dd60528d55b (2026-11-10) |
+| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master merged upstream at c463b80881fb, at d48723711bae (2026-11-07), at 6dd60528d55b (2026-11-10), and at 7e1392a42ea2 (2026-11-13) |
 | Remotes | `origin` = ZhangDM-520/linux-catchya, `upstream` = torvalds/linux, `cachyos` = CachyOS/linux |
 | Source CachyOS release | `cachyos-7.4-rc2-2` (93b4b6f912da, `7.4/base` tip), itself 7.4-rc2 + 135 non-merge commits |
 | Merge base with upstream | `7475ea8b5861` (the v7.4-rc2 tag) |
@@ -93,6 +95,25 @@ by what we did with them:
 
 Total 135 = 45 + 4 + 86 new, and the 86 new = 2 taken + 84 refused with a
 reason. Nothing is pending classification.
+
+### 2.2 Re-check at the 7.4-rc3 sync (2026-11-13)
+
+**No new release.** `7.4/base` is still `93b4b6f912da`, the same tip synced on
+2026-11-10, and the newest tag is still `cachyos-7.4-rc2-2`. Nothing was picked
+at this sync because nothing in the release moved. Re-check with
+`git ls-remote --tags cachyos 'cachyos-7.4*'` and compare `7.4/base` against
+our sync point; do not infer "no news" from a commit count alone.
+
+Three CachyOS 7.4 branches are **not ancestors of the release tip**, so they
+ship to nobody and are candidates rather than carried code:
+
+| Branch | Commits since rc2-2 | Author | Verdict |
+|---|---:|---|---|
+| `7.4/mglru-fg` | 17 | Kairui Song | **watching** — "frequency guided workingset promotion" for MGLRU. Touches `mm/vmscan.c` (+528), `mm/vmscan.c` internals, `mm/folio.c`, `mm/madvise.c`; based on 7.4-rc2. Not upstream, not in the release, and it rewrites the generation accounting this tree already tunes through `CONFIG_CACHY`. Needs a measurement before `trialling`: the MGLRU row in the patch book's candidate register was rejected as "nothing to import" precisely because no upstream work exists past our base, and this does not change that reading (it is a vendor feature, not a backport) |
+| `7.4/zswap` | 3 | Usama Arif, Herbert Xu | **watching** — separate compress/decompress requests in `mm/zswap.c` (+163), plus a `MAX_SYNC_COMP_REQSIZE` cap in `crypto/acomp`. Not upstream, not in the release. zstd zram/zswap is live on this machine, so it is measurable if a candidate is ever wanted, but a synchronous-decompression change needs a swap-latency probe this rig lacks |
+| `7.4/t2` | 49 | mixed | **rejected** — Apple T2 hardware, the same class the release already excludes (48 commits in §2.1). One entry, `amdgpu: add support for 5K`, is not T2-specific in name but is untrialled vendor display code with a dead-display failure mode, the §10.5 precedent |
+
+`7.4/snd-codecs` is in the release and already classified in §2.1.
 
 ---
 
