@@ -188,7 +188,7 @@ Out-of-tree because mainline has not caught the toolchain drift yet. One file
 Without it, `make prepare` dies at `RUSTC L rust/core.o` with
 `error: unknown unstable option: profile-sample-use`; with only the first fix it
 dies at the LLVM argument. Both were measured on rustc 1.101.0-nightly /
-LLVM 24.0.0; see `.logs/action-2026-11-06-autofdo-rust-flags.md`.
+LLVM 24.0.0; see the action record retired to the private warehouse (2026-11-17).
 
 **Half retired 2026-11-13.** Upstream `1178120c3bed` ("kbuild: rust: support
 stabilized flag `-Cprofile-sample-use` for Rust >= 1.100", Miguel Ojeda) landed
@@ -279,7 +279,7 @@ and two of them are silent corruption if resolved the obvious way:
 | Fact | Value |
 |---|---|
 | Our change | `dbcb4111efa2`, 2 files, +8 −3; both fragments only, no compile flag changes |
-| Provenance | found from `.logs/autofdo-propeller-full-lto-bug-report.md` (2026-11-10). The guard comes from upstream `315ad8780a12` ("kbuild: Add AutoFDO support for Clang build", 2024-11-02), whose message never restricts AutoFDO to ThinLTO |
+| Provenance | found from a bug report retired to the private warehouse (2026-11-10). The guard comes from upstream `315ad8780a12` ("kbuild: Add AutoFDO support for Clang build", 2024-11-02), whose message never restricts AutoFDO to ThinLTO |
 | Touch surface | `scripts/Makefile.autofdo` (relax the outer guard to `CONFIG_LTO_CLANG`, keep `-plugin-opt=thinlto` behind `CONFIG_LTO_CLANG_THIN`), `scripts/Makefile.propeller` (same relaxation) |
 | Upstream status | unfixed in torvalds master at `b3dfbde62cf1` (post-7.4-rc2); not submitted |
 | Measurement | makefile-fragment harness (`CONFIG_LTO_CLANG_FULL=y` / `THIN=y` / no LTO): before, the Full arm produced **no** `KBUILD_LDFLAGS`; after, it emits `--lto-sample-profile`, both `--mllvm=-*-fs-discriminator` and `-plugin-opt=-split-machine-functions`, without `-plugin-opt=thinlto`; the Thin arm is byte-identical before and after, and the no-LTO arm stays empty. lld 24 accepts every emitted flag under `-flto=full`: `--lto-sample-profile` is parsed (a bogus file fails with "Unrecognized sample profile encoding format"), `--lto-basic-block-address-map` emits `.llvm_bb_addr_map`. Not measured: an end-to-end Full-LTO kernel build |
@@ -521,8 +521,8 @@ before importing anything from it.
 | Vendor trees (AMD, Intel, NVIDIA) | platform enablement for new silicon | relevant only when the hardware is in this laptop |
 
 Decision records from this repo: `docs/cachyos-stack.md` §5 (why BORE and POC
-stay), §6 (gap analysis and rejected picks), and `.logs/exp/REPORT.md` (what the
-measurement campaign concluded).
+stay), §6 (gap analysis and rejected picks), and the measurement campaign report
+retired to the private warehouse (2026-11-17).
 
 ---
 
@@ -798,13 +798,13 @@ that is what `-sample-profile-icp-max-prom` and
 `-sample-profile-icp-relative-hotness` are for. The 0-byte result says
 `afdo.prof` has no target data, not that ICP is useless: the recipe builds that
 profile through the `~/.reserve/Kernel_PGO/` fallback because the microVM
-cannot produce LBR records (`.logs/action-2026-11-07-resync-package.md`), so
-the profile is a flat sample set with no branch stacks. The honest verdict is
-therefore **blocked on profile fidelity, not refused on merit**: re-collect
-with branch stacks (`perf record -b` under the profile guest, then the same
-`create_llvm_prof` step), re-run the three arms above, and only then can the
-knob be judged. Until that profile exists there is nothing to tune, so no
-knob is shipped.
+cannot produce LBR records (action record retired to the private warehouse,
+2026-11-17), so the profile is a flat sample set with no branch stacks. The
+honest verdict is therefore **blocked on profile fidelity, not refused on
+merit**: re-collect with branch stacks (`perf record -b` under the profile
+guest, then the same `create_llvm_prof` step), re-run the three arms above, and
+only then can the knob be judged. Until that profile exists there is nothing to
+tune, so no knob is shipped.
 
 Instrumented PGO stays refused for a different reason: porting
 `CONFIG_PGO_CLANG` at this base is a new kbuild subsystem (instrumented build,

@@ -315,7 +315,7 @@ PASS sched defaults
 ```
 
 `tools/exp/vmtest.sh` also fails on any WARN/BUG/oops in the serial log, so the
-boot was clean; log at `.logs/exp/sched/serial.log`.
+boot was clean; the serial log is retired to the private warehouse (2026-11-17).
 
 The probe's first version expected `/sys/kernel/debug/sched/cgroup_mode` to
 print just `max`; the node actually lists every mode and wraps the active one

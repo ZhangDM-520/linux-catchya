@@ -136,9 +136,8 @@ Where the detail lives
                                   retirement condition, rebase rules
     docs/cachyos-stack.md         the CachyOS stack, commit by commit, and how
                                   this tree differs from the release
-    docs/JOURNAL.md               dated one-line pointers to action reports
-    .logs/action-*.md             per-task evidence: commands, results, what
-                                  could not be verified
+    the private warehouse         dated action journal and per-task evidence,
+                                  retired from this repo on 2026-11-17
     tools/exp/                    measurement and boot-test harness
 
 If you are an AI coding assistant, those four are the contract: read the
