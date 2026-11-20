@@ -10,16 +10,21 @@ carries that torvalds/linux does not have and this book does not own — BORE,
 the POC selector, our own fixes, and the patches the recipe applies at build
 time.
 
-Last reviewed: 2026-11-13, against `cachyos-7.4-rc2-2` (`93b4b6f912da`) and
-torvalds master at `7e1392a42ea2` (post-7.4-rc3). The 58 original commits were
+Last reviewed: 2026-11-21, against `cachyos-7.4-rc3-1` (`bfd93d1af49d`) and
+torvalds master at `d0f871bfb831` (post-7.4-rc4). The previous review was
+2026-11-13, against `cachyos-7.4-rc2-2` (`93b4b6f912da`) and torvalds master at
+`7e1392a42ea2` (post-7.4-rc3). The 58 original commits were
 replayed onto the fork's synced master (torvalds master merged at
 `c463b80881fb`, again at `d48723711bae` on 2026-11-07, again at `6dd60528d55b`
-on 2026-11-10, and again at `7e1392a42ea2` on 2026-11-13), and the commits
+on 2026-11-10, again at `7e1392a42ea2` on 2026-11-13, and again at
+`d0f871bfb831` on 2026-11-21), and the commits
 recommended in section 6 were cherry-picked on top. Current stack: **67 CachyOS
 commits + 7 local kernel commits**, plus 6 `tools/` and 19 `docs/` commits. The
 two `7.4-rc2-2` picks were built and boot-tested on 2026-11-10 before being
 merged (section 3.10). The 2026-11-13 sync found no new release; §2.2 records
-what the dev branches carry and why none was taken.
+what the dev branches carry and why none was taken. The 2026-11-21 sync found
+`cachyos-7.4-rc3-1` and classifies its 156 commits in §2.3 — nothing was taken
+from it either.
 
 ---
 
@@ -35,7 +40,7 @@ master = torvalds master (merged into the fork at 6dd60528d55b, post-7.4-rc2)
 
 | Item | Value |
 |---|---|
-| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master merged upstream at c463b80881fb, at d48723711bae (2026-11-07), at 6dd60528d55b (2026-11-10), and at 7e1392a42ea2 (2026-11-13) |
+| Base tag | `catchya/base-2026-11-05` (05441d697f7f); fork master merged upstream at c463b80881fb, at d48723711bae (2026-11-07), at 6dd60528d55b (2026-11-10), at 7e1392a42ea2 (2026-11-13), and at d0f871bfb831 (2026-11-21) |
 | Remotes | `origin` = ZhangDM-520/linux-catchya, `upstream` = torvalds/linux, `cachyos` = CachyOS/linux |
 | Source CachyOS release | `cachyos-7.4-rc2-2` (93b4b6f912da, `7.4/base` tip), itself 7.4-rc2 + 135 non-merge commits |
 | Merge base with upstream | `7475ea8b5861` (the v7.4-rc2 tag) |
@@ -114,6 +119,61 @@ ship to nobody and are candidates rather than carried code:
 | `7.4/t2` | 49 | mixed | **rejected** — Apple T2 hardware, the same class the release already excludes (48 commits in §2.1). One entry, `amdgpu: add support for 5K`, is not T2-specific in name but is untrialled vendor display code with a dead-display failure mode, the §10.5 precedent |
 
 `7.4/snd-codecs` is in the release and already classified in §2.1.
+
+### 2.3 Coverage after `cachyos-7.4-rc3-1` (2026-11-21)
+
+`cachyos-7.4-rc3-1` (`bfd93d1af49d`, `7.4/base` tip) is Linux 7.4-rc3
+(`aebb72744764`) + **156 non-merge commits** (165 including merges). The
+release's history was **rewritten** — `cachyos-7.4-rc2-2` is not an ancestor of
+it — so the classes below are computed against the merged tree
+(`git cherry <merged-head> cachyos/7.4/base`, 46 patch-id/trailer matches),
+not against the previous release.
+
+| Class | Count | Carried | Comment |
+|---|---:|---:|---|
+| Already carried in this tree | 46 | 46 | 9 by the `(cherry picked from commit …)` trailer, 37 by `git patch-id --stable` against a fork commit (the trailer was dropped when the pick was adapted) |
+| Apple T2 / macsmc / Apple HID (magicmouse, DockChannel, RTKit, SPI transport, HID-core HOST bus + 16 KiB reports) | 42 | 0 | wrong hardware, largest single block again |
+| Wrong hardware, one-off | 16 | 0 | i915 RC6 ×2, i915 fbdev, i915 mbp15 lane quirk, iwlwifi, btusb ×2, B650M BT, Dell SOF, Logitech G920, Intel remapped NVMe, intel-pstate, VHBA, smu 5300, `amdgpu: add support for 5K`, Broadcom adv strip, max98390 dead-variable cleanup |
+| Samsung Galaxy Book audio + model fixups | 7 | 0 | wrong hardware |
+| `tag-release` release tooling | 7 | 0 | vendor release script, not kernel code |
+| PCI ACS override + fixups | 4 | 0 | refused, and inert here: `CONFIG_PCI_ACS_OVERRIDE` is off |
+| Compiler flags (Zen4/x86-64 ISA, GCC SMS modulo, LLVM pipeliner) | 3 | 0 | refused: we pass `-march=native` and build clang; `-mllvm -enable-pipeliner` is already in our `Makefile:950` from `5b3b6a95a6c5`, a different commit than theirs |
+| POC selector v2.6.3 + its revert | 2 | 0 | already carried as patch #2 in adapted form; the revert is CachyOS's own |
+| ADIOS 3.3.0 + fixup + `localversion` | 2 | 0 | refused, not carried (BFQ + mq-deadline are the configured paths) |
+| EEVDF interactivity tweak | 1 | 0 | refused, dead code under BORE (§5.1 precedent) |
+| `resolve_btfids` PKGBUILD add | 1 | 0 | refused: recipe owns packaging; CachyOS reverts it themselves later in the same branch |
+| NAP cpuidle governor 0.6.6 | 1 | 0 | refused, needs a measurement gate; TEO is configured |
+| bbr name fix | 1 | 0 | already carried (BBR3 as its own module) |
+| **Subtotal refused** | **87** | **0** | |
+| MGLRU-FG (frequency guided promotion) | 17 | 0 | **watching** — see §6.3; now *in* the release (merged at `6f2739fdf30c`) |
+| zswap separate/stack requests + `MAX_SYNC_COMP_REQSIZE` | 3 | 0 | **watching** — needs a swap-latency probe |
+| amd-pstate asymmetric capacity + AMD HFI stand-down | 2 | 0 | **watching** — Strix Point hybrid, unmeasured |
+| sched: NI_RANDOM restricted to `!SD_SHARE_LLC` | 1 | 0 | **watching** — the tree has `NI_RANDOM` but not the `SD_SHARE_LLC` guard |
+| **Subtotal watching** | **23** | **0** | |
+
+Total 156 = 46 carried + 110 new, and the 110 new = **0 taken + 87 refused +
+23 watching**. Nothing is unclassified. Nothing was cherry-picked into this
+sync: the 23 watching entries go to the candidate register, not to `master`.
+
+Branch shape at the same moment: `7.4/base` is the release tip;
+`7.4/cachy` (+3) and `7.4/fixes` (+1) are the only branches that are **not**
+ancestors of it — dev branches, classified commit by commit below.
+`7.4/bbr3`, `7.4/mglru-fg`, `7.4/zswap`, `7.4/t2`, `7.4/amd-pstate`,
+`7.4/snd-codecs` and `7.4/vesa-dsc-bpp` are all merged into the release tip
+(`git merge-base --is-ancestor` exits 0), so they ship and were classified as
+release content above, not as candidates.
+
+| Dev branch | Commits ahead of the release tip | Verdict |
+|---|---:|---|
+| `7.4/cachy` | 3 | refused: `CACHYMOD: sched/fair: Reduce newidle_ratio sample window to 512` (a tuning of the proportional-newidle code this tree already carries; no counter gate met), `kbuild: revert resolve_btfids from PKGBUILD` (net-zero tooling), `CACHY: drop unused modulo scheduling` (removes GCC SMS flags we never enabled) |
+| `7.4/fixes` | 1 | refused for now: `HID: playstation: Ignore DualSense Bluetooth audio reports as input` — a real bug fix (audio reports 0x31 parsed as controller state), but no DualSense on this machine and the branch is not a release; register candidate if it reaches rc4 |
+
+The `CACHYMOD` window change is the one entry worth a second look at a later
+sync: it halves `update_newidle_stats()`'s sample window (1024 → 512, decay
+`delta >> 23`) and sets the `!SD_SHARE_LLC` weight floor to 16/512. This tree
+carries the proportional newidle code (`9fe89f022c05`, `33cf66d88306`) without
+the `!SD_SHARE_LLC` restriction, so the patch would apply but not measure the
+same thing here.
 
 ---
 
@@ -529,6 +589,57 @@ does not re-derive them):
 - Pipeliner: our Makefile hunk has the explanatory comment inline; rc2-2 trims
   it because the GCC SMS commit occupies that spot. Same `-mllvm
   -enable-pipeliner` flag.
+
+### 6.3 Gap analysis vs `cachyos-7.4-rc3-1` (2026-11-21)
+
+Method: `git cherry <merged-head> cachyos/7.4/base` over all 156 non-merge
+commits of the release, then `git patch-id --stable` and a
+`(cherry picked from commit …)` trailer scan over the fork's 107 non-torvalds
+commits for every entry `git cherry` called new. 46 of the 156 are already ours
+(9 trailer, 37 patch-id); nothing was taken from the other 110. Counts in §2.3.
+
+**Nothing picked.** The release is 7.4-rc3-based, and our sync base already
+contained every configuration and scheduler default the earlier releases gave
+us; rc3-1's genuinely new content is another Apple/macsmc block (42 commits),
+more one-off hardware quirks, and four candidate series.
+
+Watching, with the reason each is not trialling yet:
+
+- **MGLRU-FG, 17 commits (`bdb9c9a8be08`…, merged into the release at
+  `6f2739fdf30c`)** — frequency guided workingset promotion. It is *in* the
+  release now, which changes its status: it is no longer a vendor dev-branch
+  experiment, it is shipped code. It still has no gate here — no workingset
+  hit-rate or refault counter in `tools/exp/`, and it rewrites the generation
+  accounting (`mm/vmscan.c`, `include/linux/mm_inline.h`) that `CONFIG_CACHY`
+  tunes. Materially larger than the aggregate diff `docs/out-of-tree-patches.md`
+  §5.4 recorded from the 7.4-rc2-based branch: it now also touches
+  `mm/memcontrol`, `mm/damon`, `mm/khugepaged`, `mm/madvise`, `mm/huge_memory`,
+  `fs/proc/task_mmu.c` and `fs/btrfs/compression.c`.
+- **zswap separate/stack requests, 3 commits** — unchanged verdict from §6.2;
+  still no swap-latency probe.
+- **amd-pstate asymmetric capacity + AMD HFI stand-down, 2 commits
+  (`9002d063c199`, `28485300ff56`)** — new to the release. `9002d063c199`
+  records the ill-fated upstream series and only edits `MAINTAINERS`;
+  `28485300ff56` is the real one, making the AMD HFI driver stand down when
+  amd-pstate CAS is active. This laptop runs amd-pstate in `guided` mode on
+  Strix Point, so it is the most plausible of the four — but it needs a
+  capacity-asymmetry and power measurement this rig cannot take in QEMU.
+- **sched: NI_RANDOM restricted to `!SD_SHARE_LLC`, 1 commit
+  (`822f78a2e832`)** — a sibling of the proportional-newidle work we carry.
+  Our `kernel/sched/fair.c:15293` has `sched_feat(NI_RANDOM)` with no
+  `SD_SHARE_LLC` guard, so this would change behaviour on our tree; it needs
+  the newidle counter campaign that `§11` says the rig cannot take yet.
+
+Refused for the record, one line each: Apple T2/macsmc/Apple-HID 42 ·
+wrong-hardware one-offs 16 · Samsung Galaxy Book 7 · `tag-release` tooling 7 ·
+ACS override 4 (inert, `CONFIG_PCI_ACS_OVERRIDE` off) · compiler flags 3
+(`-march=native`, clang, and the pipeliner is already at `Makefile:950`) ·
+POC selector + revert 2 (already carried adapted) · ADIOS 2 (not carried) ·
+EEVDF interactivity 1 (dead under BORE) · `resolve_btfids` 1 (recipe's job) ·
+NAP governor 1 (no gate) · bbr name 1 (already carried).
+
+Dev branches: `7.4/cachy` (+3) and `7.4/fixes` (+1) are the only non-ancestors
+of the release tip — see the §2.3 table for the per-commit verdicts.
 
 ---
 

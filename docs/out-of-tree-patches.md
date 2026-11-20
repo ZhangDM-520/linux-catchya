@@ -9,7 +9,15 @@ Companion book: `docs/cachyos-stack.md` covers the commits taken *from* CachyOS
 releases. This one covers everything else — including CachyOS **patch files**
 their own tree no longer ships, which is how BORE and POC ended up here.
 
-Last reviewed: 2026-11-07, against `master` = `cc8482fde096`.
+Last reviewed: 2026-11-21, against `master` = `d0f871bfb831` merged into the fork
+at `4de9ab0e2ec3` (sync branch merged as `26be5db15f41`). The 2026-11-21 sync
+re-proved every row in §2 by content on the merged tree — BORE, POC, the
+max96717 `!en_val` fix, the AutoFDO Rust `rustc-option` probe, THP
+`defer`-by-default, idle pre-zeroing's `prezeroed` out-param threaded through
+`rmqueue(preferred_zone, …)`, the GFXOFF `gfx_off_delay_ms` ops, the futex-affine
+Kconfig, and the objtool `cfunc` section-size guard — and re-ran
+`verify-config.sh` to exit 0 over the carried set (`TCP_CONG_BBR3=m`, not `=y`).
+The previous review was 2026-11-07, against `master` = `cc8482fde096`.
 
 ---
 
@@ -472,8 +480,11 @@ Where an import waits before it earns a row in section 2. Status flow:
 | Candidate | Source | Status | Measurement | Notes |
 |---|---|---|---|---|
 | MGLRU aggressive tuning / backports | mainline `LRU_GEN*`, tuned by `CONFIG_CACHY` | **rejected — nothing to import** | in-tree and already on: `LRU_GEN=y`, `LRU_GEN_ENABLED=y`, caps `0x0007` (`CORE\|MM_WALK\|NONLEAF_YOUNG`), `swappiness` 100 | No MGLRU commit landed upstream after our base (`git log c463b80881fb..upstream/master --grep lru_gen` is empty), so there is no backport to take. The one real finding is a unit bug: `lru_gen_min_ttl` is 100 **jiffies**, so the protection window silently follows `_HZ_ticks` — 334 ms at the validation build's HZ=300, 166 ms for the HZ=600 package. It is a 2-line change (`HZ / 6`) *if* a measurement ever shows the HZ-scaled window is wrong; no measurement does, so no patch is carried |
-| MGLRU-FG (frequency guided promotion) | CachyOS `7.4/mglru-fg` (Kairui Song, 17 commits) | **watching** | none — no probe covers workingset promotion | Not in the release (`7.4/base` does not contain the branch) and not upstream; rewrites MGLRU generation accounting in `mm/vmscan.c` (+528) and `mm/folio.c`, based on 7.4-rc2. Reopens the July decision that tuning MGLRU through `CONFIG_CACHY` is enough: as a vendor feature rather than a backport it is a different question, but it needs a hit-rate or refault counter first. See `docs/cachyos-stack.md` §2.2 |
-| zswap separate compress/decompress requests | CachyOS `7.4/zswap` (Usama Arif, Herbert Xu, 3 commits) | **watching** | none — the rig has no swap-latency probe | Not in the release and not upstream; `mm/zswap.c` (+163) plus a `MAX_SYNC_COMP_REQSIZE` acomp cap. zram/zswap with zstd is live on this laptop, so it is measurable in principle, but a synchronous-decompression change needs a probe `tools/exp/` does not have |
+| MGLRU-FG (frequency guided promotion) | CachyOS `7.4/mglru-fg` (Kairui Song, 17 commits) — **now merged into the released `cachyos-7.4-rc3-1`** | **watching** | none — no probe covers workingset promotion | Shipped code as of `cachyos-7.4-rc3-1` (merged at `6f2739fdf30c`), not upstream, so it is a vendor feature rather than a backport. Rewrites MGLRU generation accounting: `mm/vmscan.c`, `include/linux/mm_inline.h`, `include/linux/memcontrol.h`, `mm/damon/paddr.c`, `mm/khugepaged.c`, `mm/madvise.c`, `mm/huge_memory.c`, `fs/proc/task_mmu.c`, `fs/btrfs/compression.c` (hundreds of lines, larger than the 17-commit rc2-based branch this row first recorded). Reopens the decision that `CONFIG_CACHY` tuning is enough — but it needs a hit-rate or refault counter first. See `docs/cachyos-stack.md` §2.3, §6.3 |
+| zswap separate compress/decompress requests | CachyOS `7.4/zswap` (Usama Arif, Herbert Xu, 3 commits) — **now merged into `cachyos-7.4-rc3-1`** | **watching** | none — the rig has no swap-latency probe | `mm/zswap.c` plus a `MAX_SYNC_COMP_REQSIZE` acomp cap (`crypto/acompress.c`). zram/zswap with zstd is live on this laptop, so it is measurable in principle, but a synchronous-decompression change needs a probe `tools/exp/` does not have. Re-confirmed 2026-11-21 |
+| amd-pstate asymmetric capacity + AMD HFI stand-down | CachyOS `7.4/amd-pstate` (`9002d063c199` MAINTAINERS-only, `28485300ff56` the real change), merged into `cachyos-7.4-rc3-1` | **watching** | none — needs a capacity/power measurement, QEMU cannot take it | `28485300ff56` makes the AMD HFI driver stand down while amd-pstate CAS is active. This laptop runs amd-pstate in `guided` mode on a Strix Point hybrid, which is exactly the target, so it is the most plausible candidate from the 2026-11-21 sync — no gate exists yet. See `docs/cachyos-stack.md` §6.3 |
+| sched: restrict `NI_RANDOM` throttling to `!SD_SHARE_LLC` domains | CachyOS `7.4/cachy` dev branch, `822f78a2e832`, merged into `cachyos-7.4-rc3-1` | **watching** | none — needs the newidle counter campaign §11 says the rig cannot take | Sibling of the proportional-newidle code this tree carries (`9fe89f022c05`, `33cf66d88306`). Our `kernel/sched/fair.c:15293` uses `sched_feat(NI_RANDOM)` without the `SD_SHARE_LLC` guard, so the patch applies and changes behaviour here — which is why it needs a counter, not a cherry-pick |
+| HID: playstation — ignore DualSense BT audio reports | CachyOS `7.4/fixes` dev branch, `d895ccb7f896` | **watching** | none — no DualSense on this machine | A real bug (BT report 0x31 audio payloads parsed as controller state), three lines. Not on any hardware here, so it cannot be measured; take it only if CachyOS ships it in a release and we still want bug-for-bug parity |
 | Apple T2 stack | CachyOS `7.4/t2` (49 commits) | **rejected** | n/a | Wrong hardware, the same class the release already excludes (48 commits, `docs/cachyos-stack.md` §2.1). Contains one untrialled `amdgpu: add support for 5K`, refused on the §10.5 precedent: no reference patch, dead-display failure mode |
 | THP async defrag | this tree | **trialling** | §3.5 | `CONFIG_THP_ASYNC_DEFRAG` |
 | Idle page pre-zeroing | this tree | **trialling** | §3.6 | `CONFIG_PREZERO_PAGES` |
